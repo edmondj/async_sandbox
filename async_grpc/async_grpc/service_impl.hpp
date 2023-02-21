@@ -35,4 +35,7 @@ namespace async_grpc {
   concept ServiceImplConcept = std::derived_from<T, IServiceImpl> && GrpcServiceConcept<typename T::Service> && requires(T t) {
     { t.GetConcreteGrpcService() } -> std::same_as<typename T::Service::AsyncService&>;
   };
+
+  template<typename T, typename TService>
+  concept AsyncServiceBase = ServiceImplConcept<TService> && std::derived_from<typename TService::Service::AsyncService, T>;
 }

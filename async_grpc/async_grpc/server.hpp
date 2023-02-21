@@ -164,10 +164,8 @@ namespace async_grpc {
     { handler(std::move(arg)) } -> std::same_as<ServerUnaryCoroutine>;
   };
 
-  template<typename T, typename TService, typename TRequest, typename TResponse>
-  concept UnaryListenFuncConcept = requires(T func, typename TService::Service::AsyncService service, grpc::ServerContext* context, TRequest* request, grpc::ServerAsyncResponseWriter<TResponse>* response, grpc::CompletionQueue* cq, grpc::ServerCompletionQueue* notif_cq, void* tag) {
-    { (service.*func)(context, request, response, cq, notif_cq, tag) };
-  };
+  template<typename TService, typename TRequest, typename TResponse>
+  using TUnaryListenFunc = void(TService::*)(grpc::ServerContext* context, TRequest* request, grpc::ServerAsyncResponseWriter<TResponse>* response, grpc::CompletionQueue* cq, grpc::ServerCompletionQueue* notif_cq, void* tag);
 
   // ~Unary
 
@@ -180,12 +178,12 @@ namespace async_grpc {
     template<typename TRequest, typename TResponse>
     friend class ServerUnaryContext;
 
-    template<typename TRequest, typename TResponse, ServiceImplConcept TService, UnaryListenFuncConcept<TService, TRequest, TResponse> TListenFunc, ServerUnaryHandlerConcept<TRequest, TResponse> THandler>
-    ServerListenCoroutine StartListeningUnary(TService& service, TListenFunc listenFunc, THandler&& handler) {
+    template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TGrpcService, ServerUnaryHandlerConcept<TRequest, TResponse> THandler>
+    ServerListenCoroutine StartListeningUnary(TService& service, TUnaryListenFunc<TGrpcService, TRequest, TResponse> listenFunc, THandler&& handler) {
       struct PollUnary {
         grpc::ServerCompletionQueue* cq;
         TService& service;
-        TListenFunc listenFunc;
+        TUnaryListenFunc<TGrpcService, TRequest, TResponse> listenFunc;
         grpc::ServerContext& context;
         TRequest& request;
         grpc::ServerAsyncResponseWriter<TResponse>& response;
