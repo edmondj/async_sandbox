@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package echo_service;
+
+message UnaryEchoRequest {
+  string message = 1;
+}
+message UnaryEchoResponse {
+  string message = 1;
+}
+
+message ClientStreamEchoRequest {
+  string message = 1;
+}
+message ClientStreamEchoResponse {
+  repeated string messages = 1;
+}
+
+message ServerStreamEchoRequest {
+  string message = 1;
+  uint32 count = 2;
+  uint32 delay_ms = 3;
+}
+message ServerStreamEchoResponse {
+  string message = 1;
+  uint32 n = 2;
+  uint32 total = 3;
+}
+
+message BidirectionalStreamEchoRequest {
+  message Start {}
+  message Stop {}
+  message Message {
+    string message = 1;
+    uint32 delay_ms = 2;
+  }
+
+  oneof command {
+    Start start = 1;
+    Stop stop = 2;
+    Message message = 3;
+  }
+}
+message BidirectionalStreamEchoResponse {
+  string message = 1;
+}
+
+service EchoService {
+  rpc UnaryEcho(UnaryEchoRequest) returns(UnaryEchoResponse);
+  rpc ClientStreamEcho(stream ClientStreamEchoRequest) returns(ClientStreamEchoResponse);
+  rpc ServerStreamEcho(ServerStreamEchoRequest) returns(stream ServerStreamEchoResponse);
+  rpc BidirectionalStreamEcho(stream BidirectionalStreamEchoRequest) returns(stream BidirectionalStreamEchoResponse);
+}
