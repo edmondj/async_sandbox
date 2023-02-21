@@ -23,12 +23,12 @@ namespace async_grpc {
       return &m_service;
     }
 
-    Service::AsyncService& GetConcreteGrpcService() {
+    typename Service::AsyncService& GetConcreteGrpcService() {
       return m_service;
     }
 
   private:
-    TService::AsyncService m_service;
+    typename TService::AsyncService m_service;
   };
 
   template<typename T>

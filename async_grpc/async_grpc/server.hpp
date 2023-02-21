@@ -208,7 +208,7 @@ namespace async_grpc {
       {
         auto context = std::make_unique<ServerUnaryContext<TRequest, TResponse>>(*this);
         grpc::ServerCompletionQueue* cq = GetNextCq();
-        if (!co_await PollUnary(GetNextCq(), service, listenFunc, context->m_context, context->m_request, context->m_response))
+        if (!co_await PollUnary{ GetNextCq(), service, listenFunc, context->m_context, context->m_request, context->m_response })
         {
           // listen failed, most likely shutting down
           co_return;

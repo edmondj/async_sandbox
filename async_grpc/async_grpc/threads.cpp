@@ -1,6 +1,7 @@
 #include "threads.hpp"
 #include <unordered_set>
 #include <shared_mutex>
+#include <mutex>
 
 namespace async_grpc {
 

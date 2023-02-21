@@ -248,7 +248,7 @@ int main()
 class EchoServiceImpl : public async_grpc::BaseServiceImpl<echo_service::EchoService> {
 public:
   virtual void StartListening(async_grpc::Server& server) override {
-    server.StartListeningUnary<echo_service::UnaryEchoRequest, echo_service::UnaryEchoResponse>(*this, &echo_service::EchoService::AsyncService::RequestUnaryEcho,
+    server.StartListeningUnary(*this, &echo_service::EchoService::AsyncService::RequestUnaryEcho,
       [](std::unique_ptr<async_grpc::ServerUnaryContext<echo_service::UnaryEchoRequest, echo_service::UnaryEchoResponse>> context) -> async_grpc::ServerUnaryCoroutine {
         assert(async_grpc::ThisThreadIsGrpc());
 
