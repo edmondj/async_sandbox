@@ -1,3 +1,4 @@
+/*
 #include <iostream>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/alarm.h>
@@ -236,4 +237,37 @@ int main()
   server->Shutdown();
   cq->Shutdown();
   grpc_thread.join();
+}
+*/
+
+#include <iostream>
+#include <async_grpc/server.hpp>
+#include <protos/echo_service.grpc.pb.h>
+
+class EchoServiceImpl : public async_grpc::BaseServiceImpl<echo_service::EchoService> {
+public:
+  virtual void StartListening(async_grpc::Server& server) override {
+    server.StartListeningUnary<echo_service::UnaryEchoRequest, echo_service::UnaryEchoResponse>(*this, &echo_service::EchoService::AsyncService::RequestUnaryEcho,
+      [](std::unique_ptr<async_grpc::ServerUnaryContext<echo_service::UnaryEchoRequest, echo_service::UnaryEchoResponse>> context) -> async_grpc::ServerUnaryCoroutine {
+        echo_service::UnaryEchoResponse response;
+        response.set_message(context->GetRequest().message());
+        co_await context->Finish(response);
+      }
+    );
+  }
+};
+
+int main() {
+
+  EchoServiceImpl echo;
+
+  auto server = [&]() {
+    async_grpc::ServerOptions options;
+    options.addresses.push_back("[::1]:4213");
+    options.services.push_back(std::ref(echo));
+    return async_grpc::Server(std::move(options));
+  }();
+
+  std::cin.get();
+  std::cout << "Shutting down" << std::endl;
 }

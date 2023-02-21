@@ -5,8 +5,5 @@
 )
 
 target_link_libraries(async_grpc
-  PUBLIC
-    libprotobuf
-    grpc
-    grpc++
+  PUBLIC libprotobuf grpc grpc++
 )

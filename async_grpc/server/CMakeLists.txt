@@ -2,8 +2,8 @@ add_executable(server
   main.cpp
 )
 target_link_libraries(server
-  PRIVATE protos
+  PRIVATE async_grpc protos
 )
 target_include_directories(server
-  PRIVATE "$<TARGET_PROPERTY:protos,INTERFACE_INCLUDE_DIRECTORIES>"
+  PRIVATE "$<TARGET_PROPERTY:async_grpc,SOURCE_DIR>/.." "$<TARGET_PROPERTY:protos,BINARY_DIR>/.."
 )

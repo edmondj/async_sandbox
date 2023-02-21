@@ -1,9 +1,13 @@
 #pragma once
 
 #include <thread>
-#include <grpcpp/completion_queue.h>
+#include <concepts>
+#include <grpcpp/grpcpp.h>
 
 namespace async_grpc {
+
+  template<typename T>
+  concept GrpcServiceConcept = std::derived_from<typename T::AsyncService, grpc::Service>;
 
   // All coroutine's promise ran inside a completion queue loop must inherit from this
   struct BaseGrpcPromise {

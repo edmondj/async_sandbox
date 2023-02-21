@@ -5,11 +5,10 @@ add_library(protos
   variable_service.proto
 )
 target_link_libraries(protos
-  PUBLIC async_grpc
+  PUBLIC libprotobuf grpc grpc++
 )
 target_include_directories(protos
   PUBLIC "$<TARGET_PROPERTY:async_grpc,INTERFACE_INCLUDE_DIRECTORIES>"
-  INTERFACE "$<TARGET_FILE_DIR:protos>"
 )
 
 protobuf_generate(TARGET protos LANGUAGE cpp)
