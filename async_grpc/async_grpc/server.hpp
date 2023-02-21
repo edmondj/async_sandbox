@@ -65,14 +65,16 @@ namespace async_grpc {
 
     const TRequest& GetRequest() const { return m_request; }
 
-    class FinishWithErrorAwaitable;
-    FinishWithErrorAwaitable FinishWithError(const grpc::Status& status) {
-      return FinishWithErrorAwaitable(m_response, status);
+    auto FinishWithError(const grpc::Status& status) {
+      return GrpcAwaitable([&](void* tag) {
+        m_response.FinishWithError(status, tag);
+      });
     }
 
-    class FinishAwaitable;
-    FinishAwaitable Finish(const TResponse& response, const grpc::Status& status = grpc::Status::OK) {
-      return FinishAwaitable(m_response, response, status);
+    auto Finish(const TResponse& response, const grpc::Status& status = grpc::Status::OK) {
+      return GrpcAwaitable([&](void* tag) {
+        m_response.Finish(response, status, tag);
+      });
     }
 
   private:
@@ -103,67 +105,11 @@ namespace async_grpc {
     };
   };
 
-  template<typename TRequest, typename TResponse>
-  class ServerUnaryContext<TRequest, TResponse>::FinishAwaitable {
-  public:
-    FinishAwaitable(grpc::ServerAsyncResponseWriter<TResponse>& response, const TResponse& message, const grpc::Status& status)
-      : m_response(response)
-      , m_message(message)
-      , m_status(status)
-    {}
-
-    bool await_ready() {
-      return false;
-    }
-
-    void await_suspend(std::coroutine_handle<ServerUnaryCoroutine::promise_type> h) {
-      m_promise = &h.promise();
-      m_response.Finish(m_message, m_status, h.address());
-    }
-
-    bool await_resume() {
-      return m_promise->lastOk;
-    }
-
-  private:
-    grpc::ServerAsyncResponseWriter<TResponse>& m_response;
-    const TResponse& m_message;
-    const grpc::Status& m_status;
-    BaseGrpcPromise* m_promise = nullptr;
-  };
-
-  template<typename TRequest, typename TResponse>
-  class ServerUnaryContext<TRequest, TResponse>::FinishWithErrorAwaitable {
-  public:
-    FinishWithErrorAwaitable(grpc::ServerAsyncResponseWriter<TResponse>& response, const grpc::Status& status)
-      : m_response(response)
-      , m_status(status)
-    {}
-
-    bool await_ready() {
-      return false;
-    }
-
-    void await_suspend(std::coroutine_handle<ServerUnaryCoroutine::promise_type> h) {
-      m_promise = &h.promise();
-      m_response.FinishWithError(m_status, h.address());
-    }
-
-    bool await_resume() {
-      return m_promise->lastOk;
-    }
-
-  private:
-    grpc::ServerAsyncResponseWriter<TResponse>& m_response;
-    const grpc::Status& m_status;
-    BaseGrpcPromise* m_promise = nullptr;
-  };
-
   template<typename T, typename TRequest, typename TResponse>
-  concept ServerUnaryHandlerConcept = requires(T handler, std::unique_ptr<ServerUnaryContext<TRequest, TResponse>> arg) {
-    { handler(std::move(arg)) } -> std::same_as<ServerUnaryCoroutine>;
-  };
-
+  concept ServerUnaryHandlerConcept = std::invocable<T, std::unique_ptr<ServerUnaryContext<TRequest, TResponse>>&&>
+    && std::same_as<std::invoke_result_t<T, std::unique_ptr<ServerUnaryContext<TRequest, TResponse>>&&>, ServerUnaryCoroutine>
+  ;
+ 
   template<typename TService, typename TRequest, typename TResponse>
   using TUnaryListenFunc = void(TService::*)(grpc::ServerContext* context, TRequest* request, grpc::ServerAsyncResponseWriter<TResponse>* response, grpc::CompletionQueue* cq, grpc::ServerCompletionQueue* notif_cq, void* tag);
 
@@ -180,35 +126,15 @@ namespace async_grpc {
 
     template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TGrpcService, ServerUnaryHandlerConcept<TRequest, TResponse> THandler>
     ServerListenCoroutine StartListeningUnary(TService& service, TUnaryListenFunc<TGrpcService, TRequest, TResponse> listenFunc, THandler&& handler) {
-      struct PollUnary {
-        grpc::ServerCompletionQueue* cq;
-        TService& service;
-        TUnaryListenFunc<TGrpcService, TRequest, TResponse> listenFunc;
-        grpc::ServerContext& context;
-        TRequest& request;
-        grpc::ServerAsyncResponseWriter<TResponse>& response;
-        BaseGrpcPromise* m_promise = nullptr;
-        
-        bool await_ready() {
-          return false;
-        }
-
-        void await_suspend(std::coroutine_handle<ServerListenCoroutine::promise_type> h) {
-          m_promise = &h.promise();
-          (service.GetConcreteGrpcService().*listenFunc)(&context, &request, &response, cq, cq, h.address());
-        }
-
-        bool await_resume() {
-          return m_promise->lastOk;
-        }
-
-      };
-
       while (true)
       {
         auto context = std::make_unique<ServerUnaryContext<TRequest, TResponse>>(*this);
         grpc::ServerCompletionQueue* cq = GetNextCq();
-        if (!co_await PollUnary{ GetNextCq(), service, listenFunc, context->m_context, context->m_request, context->m_response })
+        auto awaitable = GrpcAwaitable([&](void* tag) {
+          grpc::ServerCompletionQueue* cq = GetNextCq();
+          (service.GetConcreteGrpcService().*listenFunc)(&context->m_context, &context->m_request, &context->m_response, cq, cq, tag);
+        });
+        if (!co_await awaitable)
         {
           // listen failed, most likely shutting down
           co_return;

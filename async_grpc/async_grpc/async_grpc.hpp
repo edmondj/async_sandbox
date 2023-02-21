@@ -14,6 +14,34 @@ namespace async_grpc {
     bool lastOk = false;
   };
 
+  // TFunc must be calling an action queuing the provided tag to a completion queue managed by CompletionQueueThread
+  template<std::invocable<void*> TFunc>
+  class GrpcAwaitable {
+  public:
+    GrpcAwaitable(TFunc func)
+      : m_func(std::move(func))
+    {}
+
+    bool await_ready() {
+      return false;
+    }
+
+    template<std::derived_from<BaseGrpcPromise> TPromise>
+    void await_suspend(std::coroutine_handle<TPromise> h) {
+      m_promise = &h.promise();
+      m_func(h.address());
+    }
+
+    bool await_resume() {
+      return m_promise->lastOk;
+    }
+
+  private:
+    TFunc m_func;
+    BaseGrpcPromise* m_promise = nullptr;
+  };
+
+
   // A thread running a completion queue loop
   // The thread will stop when the associated completion queue is shut down
   // The associated completion queue must live longer than the thread
