@@ -24,7 +24,6 @@ message ServerStreamEchoRequest {
 message ServerStreamEchoResponse {
   string message = 1;
   uint32 n = 2;
-  uint32 total = 3;
 }
 
 message BidirectionalStreamEchoRequest {

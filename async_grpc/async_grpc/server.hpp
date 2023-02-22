@@ -16,31 +16,24 @@ namespace async_grpc {
     size_t executorCount = 2;
   };
 
-  using ServerListenCoroutine = GrpcCoroutine;
+  using ServerListenCoroutine = Coroutine;
 
   class Server;
 
-  class ServerExecutor {
+  class ServerExecutor : public Executor {
   public:
     ServerExecutor() = default;
     explicit ServerExecutor(std::unique_ptr<grpc::ServerCompletionQueue> cq);
 
-    void Shutdown();
-
-    grpc::CompletionQueue* GetCq() const;
     grpc::ServerCompletionQueue* GetNotifCq() const;
-
-  private:
-    std::unique_ptr<grpc::ServerCompletionQueue> m_cq;
   };
 
   class ServerContext {
   public:
-    const grpc::ServerContext& GetContext() const { return m_context; }
-    grpc::ServerContext& GetContext() { return m_context; }
-
-  protected:
-    grpc::ServerContext m_context;
+    explicit ServerContext(ServerExecutor& executor);
+  
+    ServerExecutor& executor;
+    grpc::ServerContext context;
   };
 
   template<std::derived_from<ServerContext> TContext, std::invocable<TContext&, void*> TFunc>
@@ -55,7 +48,7 @@ namespace async_grpc {
       return false;
     }
 
-    void await_suspend(std::coroutine_handle<GrpcCoroutine::promise_type> h) {
+    void await_suspend(std::coroutine_handle<Coroutine::promise_type> h) {
       m_promise = &h.promise();
       m_func(*m_context, h.address());
     }
@@ -70,7 +63,7 @@ namespace async_grpc {
   private:
     std::unique_ptr<TContext> m_context;
     TFunc m_func;
-    GrpcCoroutine::promise_type* m_promise = nullptr;
+    Coroutine::promise_type* m_promise = nullptr;
   };
 
   // Unary
@@ -81,28 +74,29 @@ namespace async_grpc {
   template<typename TRequest, typename TResponse>
   class ServerUnaryContext : public ServerContext {
   public:
-    ServerUnaryContext()
-      : m_response(&m_context)
+    explicit ServerUnaryContext(ServerExecutor& executor)
+      : ServerContext(executor)
+      , m_response(&context)
     {}
 
     TRequest request;
 
     auto FinishWithError(const grpc::Status& status) {
-      return GrpcAwaitable([&](void* tag) {
+      return Awaitable([&](void* tag) {
         m_response.FinishWithError(status, tag);
       });
     }
 
     auto Finish(const TResponse& response, const grpc::Status& status = grpc::Status::OK) {
-      return GrpcAwaitable([&](void* tag) {
+      return Awaitable([&](void* tag) {
         m_response.Finish(response, status, tag);
       });
     }
 
-    template<typename TService, AsyncServiceBase<TService> TGrpcService>
-    static auto Listen(TService& service, TUnaryListenFunc<TGrpcService, TRequest, TResponse> listenFunc, ServerExecutor& executor) {
-      return ListenAwaitable(std::make_unique<ServerUnaryContext>(), [&](ServerUnaryContext& context, void* tag) mutable {
-          (service.GetConcreteGrpcService().*listenFunc)(&context.m_context, &context.request, &context.m_response, executor.GetCq(), executor.GetNotifCq(), tag);
+    template<typename TService, AsyncServiceBase<TService> TServiceBase>
+    static auto Listen(TService& service, TUnaryListenFunc<TServiceBase, TRequest, TResponse> listenFunc, ServerExecutor& executor) {
+      return ListenAwaitable(std::make_unique<ServerUnaryContext>(executor), [&](ServerUnaryContext& context, void* tag) mutable {
+          (service.GetConcreteGrpcService().*listenFunc)(&context.context, &context.request, &context.m_response, executor.GetCq(), executor.GetNotifCq(), tag);
       });
     }
 
@@ -110,7 +104,7 @@ namespace async_grpc {
     grpc::ServerAsyncResponseWriter<TResponse> m_response;
   };
 
-  using ServerUnaryCoroutine = GrpcCoroutine;
+  using ServerUnaryCoroutine = Coroutine;
 
   template<typename T, typename TRequest, typename TResponse>
   concept ServerUnaryHandlerConcept = std::invocable<T, std::unique_ptr<ServerUnaryContext<TRequest, TResponse>>&&>
@@ -127,32 +121,33 @@ namespace async_grpc {
   template<typename TRequest, typename TResponse>
   class ServerClientStreamContext : public ServerContext {
   public:
-    ServerClientStreamContext()
-      : m_reader(&m_context)
+    explicit ServerClientStreamContext(ServerExecutor& executor)
+      : ServerContext(executor)
+      , m_reader(&context)
     {}
 
     auto Read(TRequest& request) {
-      return GrpcAwaitable([&](void* tag) {
+      return Awaitable([&](void* tag) {
         m_reader.Read(&request, tag);
       });
     }
 
     auto FinishWithError(const grpc::Status& status) {
-      return GrpcAwaitable([&](void* tag) {
+      return Awaitable([&](void* tag) {
         m_reader.FinishWithError(status, tag);
       });
     }
 
     auto Finish(const TResponse& response, const grpc::Status& status = grpc::Status::OK) {
-      return GrpcAwaitable([&](void* tag) {
+      return Awaitable([&](void* tag) {
         m_reader.Finish(response, status, tag);
       });
     }
 
-    template<typename TService, AsyncServiceBase<TService> TGrpcService>
-    static auto Listen(TService& service, TClientStreamListenFunc<TGrpcService, TRequest, TResponse> listenFunc, ServerExecutor& executor) {
-      return ListenAwaitable(std::make_unique<ServerClientStreamContext>(), [&](ServerClientStreamContext& context, void* tag) mutable {
-        (service.GetConcreteGrpcService().*listenFunc)(&context.m_context, &context.m_reader, executor.GetCq(), executor.GetNotifCq(), tag);
+    template<typename TService, AsyncServiceBase<TService> TServiceBase>
+    static auto Listen(TService& service, TClientStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc, ServerExecutor& executor) {
+      return ListenAwaitable(std::make_unique<ServerClientStreamContext>(executor), [&](ServerClientStreamContext& context, void* tag) mutable {
+        (service.GetConcreteGrpcService().*listenFunc)(&context.context, &context.m_reader, executor.GetCq(), executor.GetNotifCq(), tag);
       });
     }
 
@@ -160,7 +155,7 @@ namespace async_grpc {
     grpc::ServerAsyncReader<TResponse, TRequest> m_reader;
   };
 
-  using ServerClientStreamCoroutine = GrpcCoroutine;
+  using ServerClientStreamCoroutine = Coroutine;
 
   template<typename T, typename TRequest, typename TResponse>
   concept ServerClientStreamHandlerConcept = std::invocable<T, std::unique_ptr<ServerClientStreamContext<TRequest, TResponse>>&&>
@@ -169,6 +164,71 @@ namespace async_grpc {
 
   // ~Client Stream
 
+  // Server Stream
+
+  template<typename TService, typename TRequest, typename TResponse>
+  using TServerStreamListenFunc = void (TService::*)(grpc::ServerContext*, TRequest*, grpc::ServerAsyncWriter<TResponse>*, ::grpc::CompletionQueue*, ::grpc::ServerCompletionQueue*, void*);
+
+  template<typename TRequest, typename TResponse>
+  class ServerServerStreamContext : public ServerContext {
+  public:
+    explicit ServerServerStreamContext(ServerExecutor& executor)
+      : ServerContext(executor)
+      , m_writer(&context)
+    {}
+
+    TRequest request;
+
+    auto Write(const TResponse& response) {
+      return Awaitable([&](void* tag) {
+        m_writer.Write(response, tag);
+      });
+    }
+
+    auto Write(const TResponse& response, grpc::WriteOptions options) {
+      return Awaitable([&](void* tag) {
+        m_writer.Write(response, options, tag);
+      });
+    }
+
+    auto WriteAndFinish(const TResponse& response, grpc::WriteOptions options, const grpc::Status& status = grpc::Status::OK) {
+      return Awaitable([&](void* tag) {
+        m_writer.WriteAndFinish(response, options, status, tag);
+      });
+    }
+
+    auto FinishWithError(const grpc::Status& status) {
+      return Awaitable([&](void* tag) {
+        m_writer.FinishWithError(status, tag);
+      });
+    }
+
+    auto Finish(const grpc::Status& status = grpc::Status::OK) {
+      return Awaitable([&](void* tag) {
+        m_writer.Finish(status, tag);
+      });
+    }
+
+    template<typename TService, AsyncServiceBase<TService> TServiceBase>
+    static auto Listen(TService& service, TServerStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc, ServerExecutor& executor) {
+      return ListenAwaitable(std::make_unique<ServerServerStreamContext>(executor), [&](ServerServerStreamContext& context, void* tag) mutable {
+        (service.GetConcreteGrpcService().*listenFunc)(&context.context, &context.request, &context.m_writer, executor.GetCq(), executor.GetNotifCq(), tag);
+      });
+    }
+
+  private:
+    grpc::ServerAsyncWriter<TResponse> m_writer;
+  };
+
+  using ServerServerStreamCoroutine = Coroutine;
+
+  template<typename T, typename TRequest, typename TResponse>
+  concept ServerServerStreamHandlerConcept = std::invocable<T, std::unique_ptr<ServerServerStreamContext<TRequest, TResponse>>&&>
+    && std::same_as<std::invoke_result_t<T, std::unique_ptr<ServerServerStreamContext<TRequest, TResponse>>&&>, ServerServerStreamCoroutine>
+    ;
+
+  // ~Server Stream
+
 #define ASYNC_GRPC_SERVER_LISTEN_FUNC(service, method) &service::AsyncService::Request ## method
 
   class Server {
@@ -176,19 +236,26 @@ namespace async_grpc {
     explicit Server(ServerOptions options);
     ~Server();
 
-    template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TGrpcService, ServerUnaryHandlerConcept<TRequest, TResponse> THandler>
-    ServerListenCoroutine StartListeningUnary(TService& service, TUnaryListenFunc<TGrpcService, TRequest, TResponse> listenFunc, THandler handler) {
+    template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TServiceBase, ServerUnaryHandlerConcept<TRequest, TResponse> THandler>
+    ServerListenCoroutine StartListeningUnary(TService& service, TUnaryListenFunc<TServiceBase, TRequest, TResponse> listenFunc, THandler handler) {
       while (auto context = co_await ServerUnaryContext<TRequest, TResponse>::Listen(service, listenFunc, GetNextExecutor())) {
         handler(std::move(context));
       }
     }
 
-    template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TGrpcService, ServerClientStreamHandlerConcept<TRequest, TResponse> THandler>
-    ServerListenCoroutine StartListeningClientStream(TService& service, TClientStreamListenFunc<TGrpcService, TRequest, TResponse> listenFunc, THandler handler) {
+    template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TServiceBase, ServerClientStreamHandlerConcept<TRequest, TResponse> THandler>
+    ServerListenCoroutine StartListeningClientStream(TService& service, TClientStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc, THandler handler) {
       while (auto context = co_await ServerClientStreamContext<TRequest, TResponse>::Listen(service, listenFunc, GetNextExecutor())) {
         handler(std::move(context));
       }
     }
+
+    template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TServiceBase, ServerServerStreamHandlerConcept<TRequest, TResponse> THandler>
+    ServerListenCoroutine StartListeningServerStream(TService& service, TServerStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc, THandler handler) {
+      while (auto context = co_await ServerServerStreamContext<TRequest, TResponse>::Listen(service, listenFunc, GetNextExecutor())) {
+        handler(std::move(context));
+      }
+    } 
 
   private:
     ServerExecutor& GetNextExecutor() {
@@ -200,7 +267,7 @@ namespace async_grpc {
     std::unique_ptr<grpc::Server> m_server;
     
     struct Executor {
-      CompletionQueueThread thread;
+      ExecutorThread thread;
       ServerExecutor executor;
     };
     std::vector<Executor> m_executors;

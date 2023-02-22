@@ -3,18 +3,19 @@
 #include <thread>
 #include <concepts>
 #include <grpcpp/grpcpp.h>
+#include <grpcpp/alarm.h>
 
 namespace async_grpc {
 
   template<typename T>
-  concept GrpcServiceConcept = std::derived_from<typename T::AsyncService, grpc::Service>;
+  concept ServiceConcept = std::derived_from<typename T::AsyncService, grpc::Service>;
 
 
-  struct GrpcCoroutine {
+  struct Coroutine {
     struct promise_type {
       bool lastOk = false;
 
-      inline GrpcCoroutine get_return_object() { return {}; }
+      inline Coroutine get_return_object() { return {}; }
       inline std::suspend_never initial_suspend() noexcept { return {}; };
       inline std::suspend_always final_suspend() noexcept { return {}; };
       void return_void() {}
@@ -24,9 +25,9 @@ namespace async_grpc {
 
   // TFunc must be calling an action queuing the provided tag to a completion queue managed by CompletionQueueThread
   template<std::invocable<void*> TFunc>
-  class GrpcAwaitable {
+  class Awaitable {
   public:
-    GrpcAwaitable(TFunc func)
+    Awaitable(TFunc func)
       : m_func(std::move(func))
     {}
 
@@ -34,7 +35,7 @@ namespace async_grpc {
       return false;
     }
 
-    void await_suspend(std::coroutine_handle<GrpcCoroutine::promise_type> h) {
+    void await_suspend(std::coroutine_handle<Coroutine::promise_type> h) {
       m_promise = &h.promise();
       m_func(h.address());
     }
@@ -45,24 +46,41 @@ namespace async_grpc {
 
   private:
     TFunc m_func;
-    GrpcCoroutine::promise_type* m_promise = nullptr;
+    Coroutine::promise_type* m_promise = nullptr;
   };
 
-
-  // A thread running a completion queue loop
-  // The thread will stop when the associated completion queue is shut down
-  // The associated completion queue must live longer than the thread
-  class CompletionQueueThread {
+  class Executor {
   public:
-    CompletionQueueThread() = default;
-    explicit CompletionQueueThread(grpc::CompletionQueue* cq);
+    Executor() = default;
+    explicit Executor(std::unique_ptr<grpc::CompletionQueue> cq);
 
-    CompletionQueueThread(CompletionQueueThread&&) = default;
-    CompletionQueueThread& operator=(CompletionQueueThread&&) = default;
-    ~CompletionQueueThread() = default;
+    bool Poll();
+    void Shutdown();
 
-    // Helper tick logic, mostly for debug
-    static bool Tick(grpc::CompletionQueue* cq); 
+    grpc::CompletionQueue* GetCq() const;
+
+  private:
+    std::unique_ptr<grpc::CompletionQueue> m_cq;
+  };
+
+  template<typename T>
+  auto Alarm(Executor& executor, const T& deadline) {
+    return Awaitable([&, alarm = grpc::Alarm()](void* tag) mutable {
+      alarm.Set(executor.GetCq(), deadline, tag);
+    });
+  }
+
+  // A thread running an executor Poll loop
+  // The thread will stop when the associated executor is shut down
+  // The associated executor must live longer than the thread
+  class ExecutorThread {
+  public:
+    ExecutorThread() = default;
+    explicit ExecutorThread(Executor& executor);
+
+    ExecutorThread(ExecutorThread&&) = default;
+    ExecutorThread& operator=(ExecutorThread&&) = default;
+    ~ExecutorThread() = default;
 
   private:
     std::jthread m_thread;

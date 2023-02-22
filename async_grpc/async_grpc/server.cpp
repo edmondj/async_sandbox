@@ -4,21 +4,16 @@
 namespace async_grpc {
   
   ServerExecutor::ServerExecutor(std::unique_ptr<grpc::ServerCompletionQueue> cq)
-    : m_cq(std::move(cq)) {
-  }
-
-  void ServerExecutor::Shutdown() {
-    m_cq->Shutdown();
-  }
-
-  grpc::CompletionQueue* ServerExecutor::GetCq() const {
-    return m_cq.get();
+    : Executor(std::move(cq)) {
   }
 
   grpc::ServerCompletionQueue* ServerExecutor::GetNotifCq() const {
-    return m_cq.get();
+    return static_cast<grpc::ServerCompletionQueue*>(GetCq());
   }
 
+  ServerContext::ServerContext(ServerExecutor& executor)
+    : executor(executor)
+  {}
 
   Server::Server(ServerOptions options)
     : m_options(std::move(options))
@@ -30,10 +25,12 @@ namespace async_grpc {
     for (IServiceImpl& service : m_options.services) {
       builder.RegisterService(service.GetGrpcService());
     }
+    // reserve is *needed*, to avoid moving references to executors that are used in executor threads
+    m_executors.reserve(m_options.executorCount);
     for (size_t i = 0; i < m_options.executorCount; ++i) {
       auto& executor = m_executors.emplace_back();
       executor.executor = ServerExecutor(builder.AddCompletionQueue());
-      executor.thread = CompletionQueueThread(executor.executor.GetNotifCq());
+      executor.thread = ExecutorThread(executor.executor);
     }
     m_server = builder.BuildAndStart();
 

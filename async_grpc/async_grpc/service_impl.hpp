@@ -14,7 +14,7 @@ namespace async_grpc {
     virtual void StartListening(Server& server) = 0;
   };
 
-  template<GrpcServiceConcept TService>
+  template<ServiceConcept TService>
   class BaseServiceImpl : public IServiceImpl {
   public:
     using Service = TService;
@@ -32,7 +32,7 @@ namespace async_grpc {
   };
 
   template<typename T>
-  concept ServiceImplConcept = std::derived_from<T, IServiceImpl> && GrpcServiceConcept<typename T::Service> && requires(T t) {
+  concept ServiceImplConcept = std::derived_from<T, IServiceImpl> && ServiceConcept<typename T::Service> && requires(T t) {
     { t.GetConcreteGrpcService() } -> std::same_as<typename T::Service::AsyncService&>;
   };
 
