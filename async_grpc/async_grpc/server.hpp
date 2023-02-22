@@ -103,8 +103,7 @@ namespace async_grpc {
     static auto Listen(TService& service, TUnaryListenFunc<TGrpcService, TRequest, TResponse> listenFunc, ServerExecutor& executor) {
       return ListenAwaitable(std::make_unique<ServerUnaryContext>(), [&](ServerUnaryContext& context, void* tag) mutable {
           (service.GetConcreteGrpcService().*listenFunc)(&context.m_context, &context.m_request, &context.m_response, executor.GetCq(), executor.GetNotifCq(), tag);
-        }
-      );
+      });
     }
 
   private:
@@ -132,12 +131,42 @@ namespace async_grpc {
     ServerClientStreamContext()
       : m_reader(&m_context)
     {}
-    
-    grpc::ServerAsyncReader<TResponse, TRequest>& GetReader() { return m_reader; }
+
+    auto Read(TRequest& request) {
+      return GrpcAwaitable([&](void* tag) {
+        m_reader.Read(&request, tag);
+      });
+    }
+
+    auto FinishWithError(const grpc::Status& status) {
+      return GrpcAwaitable([&](void* tag) {
+        m_reader.FinishWithError(status, tag);
+      });
+    }
+
+    auto Finish(const TResponse& response, const grpc::Status& status = grpc::Status::OK) {
+      return GrpcAwaitable([&](void* tag) {
+        m_reader.Finish(response, status, tag);
+      });
+    }
+
+    template<typename TService, AsyncServiceBase<TService> TGrpcService>
+    static auto Listen(TService& service, TClientStreamListenFunc<TGrpcService, TRequest, TResponse> listenFunc, ServerExecutor& executor) {
+      return ListenAwaitable(std::make_unique<ServerClientStreamContext>(), [&](ServerClientStreamContext& context, void* tag) mutable {
+        (service.GetConcreteGrpcService().*listenFunc)(&context.m_context, &context.m_reader, executor.GetCq(), executor.GetNotifCq(), tag);
+      });
+    }
 
   private:
     grpc::ServerAsyncReader<TResponse, TRequest> m_reader;
   };
+
+  using ServerClientStreamCoroutine = GrpcCoroutine;
+
+  template<typename T, typename TRequest, typename TResponse>
+  concept ServerClientStreamHandlerConcept = std::invocable<T, std::unique_ptr<ServerClientStreamContext<TRequest, TResponse>>&&>
+    && std::same_as<std::invoke_result_t<T, std::unique_ptr<ServerClientStreamContext<TRequest, TResponse>>&&>, ServerClientStreamCoroutine>
+  ;
 
   // ~Client Stream
 
@@ -148,13 +177,16 @@ namespace async_grpc {
     explicit Server(ServerOptions options);
     ~Server();
 
-    friend class ServerContext;
-    template<typename TRequest, typename TResponse>
-    friend class ServerUnaryContext;
-
     template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TGrpcService, ServerUnaryHandlerConcept<TRequest, TResponse> THandler>
     ServerListenCoroutine StartListeningUnary(TService& service, TUnaryListenFunc<TGrpcService, TRequest, TResponse> listenFunc, THandler&& handler) {
       while (auto context = co_await ServerUnaryContext<TRequest, TResponse>::Listen(service, listenFunc, GetNextExecutor())) {
+        std::forward<THandler>(handler)(std::move(context));
+      }
+    }
+
+    template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TGrpcService, ServerClientStreamHandlerConcept<TRequest, TResponse> THandler>
+    ServerListenCoroutine StartListeningClientStream(TService& service, TClientStreamListenFunc<TGrpcService, TRequest, TResponse> listenFunc, THandler&& handler) {
+      while (auto context = co_await ServerClientStreamContext<TRequest, TResponse>::Listen(service, listenFunc, GetNextExecutor())) {
         std::forward<THandler>(handler)(std::move(context));
       }
     }
