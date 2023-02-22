@@ -85,7 +85,7 @@ namespace async_grpc {
       : m_response(&m_context)
     {}
 
-    const TRequest& GetRequest() const { return m_request; }
+    TRequest request;
 
     auto FinishWithError(const grpc::Status& status) {
       return GrpcAwaitable([&](void* tag) {
@@ -102,12 +102,11 @@ namespace async_grpc {
     template<typename TService, AsyncServiceBase<TService> TGrpcService>
     static auto Listen(TService& service, TUnaryListenFunc<TGrpcService, TRequest, TResponse> listenFunc, ServerExecutor& executor) {
       return ListenAwaitable(std::make_unique<ServerUnaryContext>(), [&](ServerUnaryContext& context, void* tag) mutable {
-          (service.GetConcreteGrpcService().*listenFunc)(&context.m_context, &context.m_request, &context.m_response, executor.GetCq(), executor.GetNotifCq(), tag);
+          (service.GetConcreteGrpcService().*listenFunc)(&context.m_context, &context.request, &context.m_response, executor.GetCq(), executor.GetNotifCq(), tag);
       });
     }
 
   private:
-    TRequest m_request;
     grpc::ServerAsyncResponseWriter<TResponse> m_response;
   };
 
@@ -178,16 +177,16 @@ namespace async_grpc {
     ~Server();
 
     template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TGrpcService, ServerUnaryHandlerConcept<TRequest, TResponse> THandler>
-    ServerListenCoroutine StartListeningUnary(TService& service, TUnaryListenFunc<TGrpcService, TRequest, TResponse> listenFunc, THandler&& handler) {
+    ServerListenCoroutine StartListeningUnary(TService& service, TUnaryListenFunc<TGrpcService, TRequest, TResponse> listenFunc, THandler handler) {
       while (auto context = co_await ServerUnaryContext<TRequest, TResponse>::Listen(service, listenFunc, GetNextExecutor())) {
-        std::forward<THandler>(handler)(std::move(context));
+        handler(std::move(context));
       }
     }
 
     template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TGrpcService, ServerClientStreamHandlerConcept<TRequest, TResponse> THandler>
-    ServerListenCoroutine StartListeningClientStream(TService& service, TClientStreamListenFunc<TGrpcService, TRequest, TResponse> listenFunc, THandler&& handler) {
+    ServerListenCoroutine StartListeningClientStream(TService& service, TClientStreamListenFunc<TGrpcService, TRequest, TResponse> listenFunc, THandler handler) {
       while (auto context = co_await ServerClientStreamContext<TRequest, TResponse>::Listen(service, listenFunc, GetNextExecutor())) {
-        std::forward<THandler>(handler)(std::move(context));
+        handler(std::move(context));
       }
     }
 

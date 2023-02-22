@@ -1,5 +1,6 @@
 add_executable(server
   main.cpp
+  echo_service_impl.cpp
 )
 target_link_libraries(server
   PRIVATE async_grpc protos
