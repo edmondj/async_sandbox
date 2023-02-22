@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <thread>
 #include <concepts>
 #include <grpcpp/grpcpp.h>
@@ -63,12 +64,33 @@ namespace async_grpc {
     std::unique_ptr<grpc::CompletionQueue> m_cq;
   };
 
-  template<typename T>
-  auto Alarm(Executor& executor, const T& deadline) {
-    return Awaitable([&, alarm = grpc::Alarm()](void* tag) mutable {
-      alarm.Set(executor.GetCq(), deadline, tag);
-    });
-  }
+  template<typename TDeadline>
+  class Alarm {
+  public:
+    Alarm() = default;
+
+    Alarm(Executor& executor, TDeadline deadline)
+      : m_executor(&executor)
+      , m_deadline(std::move(deadline))
+    {}
+
+    auto Start() {
+      return Awaitable([&](void* tag) {
+        m_alarm.Set(m_executor->GetCq(), m_deadline, tag);
+      });
+    }
+
+    void Cancel() {
+      m_alarm.Cancel();
+    }
+
+    auto operator co_await() { return Start(); }
+
+  private:
+    Executor* m_executor = nullptr;
+    TDeadline m_deadline;
+    grpc::Alarm m_alarm;
+  };
 
   // A thread running an executor Poll loop
   // The thread will stop when the associated executor is shut down

@@ -1,5 +1,4 @@
 #include "server.hpp"
-#include "threads.hpp"
 
 namespace async_grpc {
   

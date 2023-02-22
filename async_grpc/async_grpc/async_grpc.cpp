@@ -1,15 +1,10 @@
 #include <coroutine>
-#include "threads.hpp"
 #include "async_grpc.hpp"
 
 namespace async_grpc {
 
   ExecutorThread::ExecutorThread(Executor& executor)
-    : m_thread([&executor]() {
-      auto threadId = ScopedGrpcThread();
-      while (executor.Poll())
-        ;
-    })
+    : m_thread([&executor]() { while (executor.Poll()); })
   {}
 
   Executor::Executor(std::unique_ptr<grpc::CompletionQueue> cq)

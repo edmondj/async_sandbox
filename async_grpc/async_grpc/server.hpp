@@ -197,12 +197,6 @@ namespace async_grpc {
       });
     }
 
-    auto FinishWithError(const grpc::Status& status) {
-      return Awaitable([&](void* tag) {
-        m_writer.FinishWithError(status, tag);
-      });
-    }
-
     auto Finish(const grpc::Status& status = grpc::Status::OK) {
       return Awaitable([&](void* tag) {
         m_writer.Finish(status, tag);
@@ -225,6 +219,69 @@ namespace async_grpc {
   template<typename T, typename TRequest, typename TResponse>
   concept ServerServerStreamHandlerConcept = std::invocable<T, std::unique_ptr<ServerServerStreamContext<TRequest, TResponse>>&&>
     && std::same_as<std::invoke_result_t<T, std::unique_ptr<ServerServerStreamContext<TRequest, TResponse>>&&>, ServerServerStreamCoroutine>
+    ;
+
+  // ~Server Stream
+
+  // Bidirectional Stream
+
+  template<typename TService, typename TRequest, typename TResponse>
+  using TBidirectionalStreamListenFunc = void (TService::*)(grpc::ServerContext*, grpc::ServerAsyncReaderWriter<TResponse, TRequest>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*);
+
+  template<typename TRequest, typename TResponse>
+  class ServerBidirectionalStreamContext : public ServerContext {
+  public:
+    explicit ServerBidirectionalStreamContext(ServerExecutor& executor)
+      : ServerContext(executor)
+      , m_stream(&context)
+    {}
+
+    auto Read(TRequest& request) {
+      return Awaitable([&](void* tag) {
+        m_stream.Read(&request, tag);
+      });
+    }
+
+    auto Write(const TResponse& response) {
+      return Awaitable([&](void* tag) {
+        m_stream.Write(response, tag);
+      });
+    }
+
+    auto Write(const TResponse& response, grpc::WriteOptions options) {
+      return Awaitable([&](void* tag) {
+        m_stream.Write(response, options, tag);
+      });
+    }
+
+    auto WriteAndFinish(const TResponse& response, grpc::WriteOptions options, const grpc::Status& status = grpc::Status::OK) {
+      return Awaitable([&](void* tag) {
+        m_stream.WriteAndFinish(response, options, status, tag);
+      });
+    }
+
+    auto Finish(const grpc::Status& status = grpc::Status::OK) {
+      return Awaitable([&](void* tag) {
+        m_stream.Finish(status, tag);
+      });
+    }
+
+    template<typename TService, AsyncServiceBase<TService> TServiceBase>
+    static auto Listen(TService& service, TBidirectionalStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc, ServerExecutor& executor) {
+      return ListenAwaitable(std::make_unique<ServerBidirectionalStreamContext>(executor), [&](ServerBidirectionalStreamContext& context, void* tag) mutable {
+        (service.GetConcreteGrpcService().*listenFunc)(&context.context, &context.m_stream, executor.GetCq(), executor.GetNotifCq(), tag);
+      });
+    }
+
+  private:
+    grpc::ServerAsyncReaderWriter<TResponse, TRequest> m_stream;
+  };
+
+  using ServerBidirectionalStreamCoroutine = Coroutine;
+
+  template<typename T, typename TRequest, typename TResponse>
+  concept ServerBidirectionalStreamHandlerConcept = std::invocable<T, std::unique_ptr<ServerBidirectionalStreamContext<TRequest, TResponse>>&&>
+    && std::same_as<std::invoke_result_t<T, std::unique_ptr<ServerBidirectionalStreamContext<TRequest, TResponse>>&&>, ServerBidirectionalStreamCoroutine>
     ;
 
   // ~Server Stream
@@ -256,6 +313,13 @@ namespace async_grpc {
         handler(std::move(context));
       }
     } 
+
+    template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TServiceBase, ServerBidirectionalStreamHandlerConcept<TRequest, TResponse> THandler>
+    ServerListenCoroutine StartListeningBidirectionalStream(TService& service, TBidirectionalStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc, THandler handler) {
+      while (auto context = co_await ServerBidirectionalStreamContext<TRequest, TResponse>::Listen(service, listenFunc, GetNextExecutor())) {
+        handler(std::move(context));
+      }
+    }
 
   private:
     ServerExecutor& GetNextExecutor() {

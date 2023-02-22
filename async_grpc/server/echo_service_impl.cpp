@@ -1,18 +1,13 @@
 #include <cassert>
-#include <async_grpc/threads.hpp>
 #include "echo_service_impl.hpp"
 
 static async_grpc::ServerUnaryCoroutine UnaryEchoImpl(std::unique_ptr<async_grpc::ServerUnaryContext<echo_service::UnaryEchoRequest, echo_service::UnaryEchoResponse>> context) {
-  assert(async_grpc::ThisThreadIsGrpc());
-
   echo_service::UnaryEchoResponse response;
   response.set_message(std::move(*context->request.mutable_message()));
   co_await context->Finish(response);
 }
 
 static async_grpc::ServerClientStreamCoroutine ClientStreamEchoImpl(std::unique_ptr<async_grpc::ServerClientStreamContext<echo_service::ClientStreamEchoRequest, echo_service::ClientStreamEchoResponse>> context) {
-  assert(async_grpc::ThisThreadIsGrpc());
-
   echo_service::ClientStreamEchoResponse response;
   echo_service::ClientStreamEchoRequest request;
   while (co_await context->Read(request)) {
@@ -32,9 +27,68 @@ static async_grpc::ServerServerStreamCoroutine ServerStreamEchoImpl(std::unique_
   co_await context->Finish();
 }
 
+static async_grpc::ServerBidirectionalStreamCoroutine BidirectionalStreamEchoImpl(std::unique_ptr<async_grpc::ServerBidirectionalStreamContext<echo_service::BidirectionalStreamEchoRequest, echo_service::BidirectionalStreamEchoResponse>> context) {
+  echo_service::BidirectionalStreamEchoRequest request;
+  echo_service::BidirectionalStreamEchoResponse response;
+  async_grpc::Alarm<std::chrono::system_clock::time_point> alarm;
+  uint32_t delay_ms = 0;
+  bool running = false;
+
+  while (co_await context->Read(request)) {
+    switch (request.command_case()) {
+    case echo_service::BidirectionalStreamEchoRequest::CommandCase::kMessage: {
+      if (running) {
+        co_await context->Finish(grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Can not change message while running"));
+        co_return;
+      }
+      response.set_message(std::move(*request.mutable_message()->mutable_message()));
+      delay_ms = request.message().delay_ms();
+      break;
+    }
+    case echo_service::BidirectionalStreamEchoRequest::CommandCase::kStart: {
+      if (running) {
+        co_await context->Finish(grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Can not start when already started"));
+        co_return;
+      }
+      if (response.message().empty() || delay_ms == 0) {
+        co_await context->Finish(grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Can not start with invalid message set"));
+        co_return;
+      }
+      [&]() -> async_grpc::Coroutine {
+        while (true) {
+          alarm = async_grpc::Alarm(context->executor, std::chrono::system_clock::now() + std::chrono::milliseconds(delay_ms));
+          if (!co_await alarm) {
+            break;
+          }
+          if (!co_await context->Write(response)) {
+            break;
+          }
+        }
+      }();
+      running = true;
+      break;
+    }
+    case echo_service::BidirectionalStreamEchoRequest::CommandCase::kStop: {
+      if (!running) {
+        co_await context->Finish(grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Can not stop when not running"));
+        co_return;
+      }
+      running = false;
+      alarm.Cancel();
+      break;
+    }
+    default:
+      co_await context->Finish(grpc::Status(grpc::StatusCode::INTERNAL, "Unhandled command case"));
+      co_return;
+    }
+  }
+  co_await context->Finish();
+}
+
 void EchoServiceImpl::StartListening(async_grpc::Server& server)
 {
   server.StartListeningUnary(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, UnaryEcho), &UnaryEchoImpl);
   server.StartListeningClientStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, ClientStreamEcho), &ClientStreamEchoImpl);
   server.StartListeningServerStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, ServerStreamEcho), &ServerStreamEchoImpl);
+  server.StartListeningBidirectionalStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, BidirectionalStreamEcho), &BidirectionalStreamEchoImpl);
 }
