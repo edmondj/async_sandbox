@@ -16,27 +16,7 @@ namespace async_grpc {
     size_t executorCount = 2;
   };
 
-  struct ServerListenCoroutine {
-
-    struct promise_type : BaseGrpcPromise
-    {
-      ServerListenCoroutine get_return_object() {
-        return {};
-      }
-
-      std::suspend_never initial_suspend() {
-        return {};
-      }
-
-      std::suspend_always final_suspend() noexcept {
-        return {};
-      }
-
-      void return_void() {}
-      void unhandled_exception() {}
-    };
-
-  };
+  using ServerListenCoroutine = GrpcCoroutine;
 
   class Server;
 
@@ -84,26 +64,7 @@ namespace async_grpc {
     friend class Server;
   };
 
-  struct ServerUnaryCoroutine
-  {
-    struct promise_type : BaseGrpcPromise
-    {
-      ServerUnaryCoroutine get_return_object() {
-        return {};
-      }
-
-      std::suspend_never initial_suspend() {
-        return {};
-      }
-
-      std::suspend_always final_suspend() noexcept {
-        return {};
-      }
-
-      void return_void() {}
-      void unhandled_exception() {}
-    };
-  };
+  using ServerUnaryCoroutine = GrpcCoroutine;
 
   template<typename T, typename TRequest, typename TResponse>
   concept ServerUnaryHandlerConcept = std::invocable<T, std::unique_ptr<ServerUnaryContext<TRequest, TResponse>>&&>

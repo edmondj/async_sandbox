@@ -15,7 +15,7 @@ namespace async_grpc {
     if (!cq->Next(&tag, &ok)) {
       return false;
     }
-    auto h = std::coroutine_handle<BaseGrpcPromise>::from_address(tag);
+    auto h = std::coroutine_handle<GrpcCoroutine::promise_type>::from_address(tag);
     h.promise().lastOk = ok;
     h.resume();
     if (h.done()) {

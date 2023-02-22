@@ -9,9 +9,17 @@ namespace async_grpc {
   template<typename T>
   concept GrpcServiceConcept = std::derived_from<typename T::AsyncService, grpc::Service>;
 
-  // All coroutine's promise ran inside a completion queue loop must inherit from this
-  struct BaseGrpcPromise {
-    bool lastOk = false;
+
+  struct GrpcCoroutine {
+    struct promise_type {
+      bool lastOk = false;
+
+      inline GrpcCoroutine get_return_object() { return {}; }
+      inline std::suspend_never initial_suspend() noexcept { return {}; };
+      inline std::suspend_always final_suspend() noexcept { return {}; };
+      void return_void() {}
+      void unhandled_exception() {}
+    };
   };
 
   // TFunc must be calling an action queuing the provided tag to a completion queue managed by CompletionQueueThread
@@ -26,8 +34,7 @@ namespace async_grpc {
       return false;
     }
 
-    template<std::derived_from<BaseGrpcPromise> TPromise>
-    void await_suspend(std::coroutine_handle<TPromise> h) {
+    void await_suspend(std::coroutine_handle<GrpcCoroutine::promise_type> h) {
       m_promise = &h.promise();
       m_func(h.address());
     }
@@ -38,7 +45,7 @@ namespace async_grpc {
 
   private:
     TFunc m_func;
-    BaseGrpcPromise* m_promise = nullptr;
+    GrpcCoroutine::promise_type* m_promise = nullptr;
   };
 
 
