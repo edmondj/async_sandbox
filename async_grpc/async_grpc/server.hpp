@@ -18,8 +18,6 @@ namespace async_grpc {
 
   using ServerListenCoroutine = Coroutine;
 
-  class Server;
-
   class ServerExecutor : public Executor {
   public:
     ServerExecutor() = default;
@@ -28,11 +26,13 @@ namespace async_grpc {
     grpc::ServerCompletionQueue* GetNotifCq() const;
   };
 
+  using ServerExecutorThread = ExecutorThread<ServerExecutor>;
+
   class ServerContext {
   public:
-    explicit ServerContext(ServerExecutor& executor);
+    explicit ServerContext(const ServerExecutor& executor);
   
-    ServerExecutor& executor;
+    const ServerExecutor& executor;
     grpc::ServerContext context;
   };
 
@@ -74,7 +74,7 @@ namespace async_grpc {
   template<typename TRequest, typename TResponse>
   class ServerUnaryContext : public ServerContext {
   public:
-    explicit ServerUnaryContext(ServerExecutor& executor)
+    explicit ServerUnaryContext(const ServerExecutor& executor)
       : ServerContext(executor)
       , m_response(&context)
     {}
@@ -94,7 +94,7 @@ namespace async_grpc {
     }
 
     template<typename TService, AsyncServiceBase<TService> TServiceBase>
-    static auto Listen(TService& service, TUnaryListenFunc<TServiceBase, TRequest, TResponse> listenFunc, ServerExecutor& executor) {
+    static auto Listen(TService& service, TUnaryListenFunc<TServiceBase, TRequest, TResponse> listenFunc, const ServerExecutor& executor) {
       return ListenAwaitable(std::make_unique<ServerUnaryContext>(executor), [&](ServerUnaryContext& context, void* tag) mutable {
           (service.GetConcreteGrpcService().*listenFunc)(&context.context, &context.request, &context.m_response, executor.GetCq(), executor.GetNotifCq(), tag);
       });
@@ -121,7 +121,7 @@ namespace async_grpc {
   template<typename TRequest, typename TResponse>
   class ServerClientStreamContext : public ServerContext {
   public:
-    explicit ServerClientStreamContext(ServerExecutor& executor)
+    explicit ServerClientStreamContext(const ServerExecutor& executor)
       : ServerContext(executor)
       , m_reader(&context)
     {}
@@ -145,7 +145,7 @@ namespace async_grpc {
     }
 
     template<typename TService, AsyncServiceBase<TService> TServiceBase>
-    static auto Listen(TService& service, TClientStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc, ServerExecutor& executor) {
+    static auto Listen(TService& service, TClientStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc, const ServerExecutor& executor) {
       return ListenAwaitable(std::make_unique<ServerClientStreamContext>(executor), [&](ServerClientStreamContext& context, void* tag) mutable {
         (service.GetConcreteGrpcService().*listenFunc)(&context.context, &context.m_reader, executor.GetCq(), executor.GetNotifCq(), tag);
       });
@@ -172,7 +172,7 @@ namespace async_grpc {
   template<typename TRequest, typename TResponse>
   class ServerServerStreamContext : public ServerContext {
   public:
-    explicit ServerServerStreamContext(ServerExecutor& executor)
+    explicit ServerServerStreamContext(const ServerExecutor& executor)
       : ServerContext(executor)
       , m_writer(&context)
     {}
@@ -204,7 +204,7 @@ namespace async_grpc {
     }
 
     template<typename TService, AsyncServiceBase<TService> TServiceBase>
-    static auto Listen(TService& service, TServerStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc, ServerExecutor& executor) {
+    static auto Listen(TService& service, TServerStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc, const ServerExecutor& executor) {
       return ListenAwaitable(std::make_unique<ServerServerStreamContext>(executor), [&](ServerServerStreamContext& context, void* tag) mutable {
         (service.GetConcreteGrpcService().*listenFunc)(&context.context, &context.request, &context.m_writer, executor.GetCq(), executor.GetNotifCq(), tag);
       });
@@ -231,7 +231,7 @@ namespace async_grpc {
   template<typename TRequest, typename TResponse>
   class ServerBidirectionalStreamContext : public ServerContext {
   public:
-    explicit ServerBidirectionalStreamContext(ServerExecutor& executor)
+    explicit ServerBidirectionalStreamContext(const ServerExecutor& executor)
       : ServerContext(executor)
       , m_stream(&context)
     {}
@@ -267,7 +267,7 @@ namespace async_grpc {
     }
 
     template<typename TService, AsyncServiceBase<TService> TServiceBase>
-    static auto Listen(TService& service, TBidirectionalStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc, ServerExecutor& executor) {
+    static auto Listen(TService& service, TBidirectionalStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc, const ServerExecutor& executor) {
       return ListenAwaitable(std::make_unique<ServerBidirectionalStreamContext>(executor), [&](ServerBidirectionalStreamContext& context, void* tag) mutable {
         (service.GetConcreteGrpcService().*listenFunc)(&context.context, &context.m_stream, executor.GetCq(), executor.GetNotifCq(), tag);
       });
@@ -291,6 +291,8 @@ namespace async_grpc {
   class Server {
   public:
     explicit Server(ServerOptions options);
+
+    // Will call Shutdown, see Shutdown
     ~Server();
 
     template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TServiceBase, ServerUnaryHandlerConcept<TRequest, TResponse> THandler>
@@ -321,20 +323,21 @@ namespace async_grpc {
       }
     }
 
-  private:
-    ServerExecutor& GetNextExecutor() {
-      // Round Robin on all executors, more algorithms possible
-      return m_executors[m_nextExecutor++ % m_executors.size()].executor;
+    // Will stop listening and will wait for all pending calls to complete. Use Shutdown(deadline) to forcibly cancel pending calls after some time
+    void Shutdown();
+
+    template<typename TDeadline>
+    void Shutdown(const TDeadline& deadline) {
+      m_server->Shutdown(deadline);
     }
+
+  private:
+    const ServerExecutor& GetNextExecutor();
 
     ServerOptions m_options;
     std::unique_ptr<grpc::Server> m_server;
     
-    struct Executor {
-      ExecutorThread thread;
-      ServerExecutor executor;
-    };
-    std::vector<Executor> m_executors;
+    std::vector<ServerExecutorThread> m_executors;
     std::atomic<size_t> m_nextExecutor = 0;
   };
 }

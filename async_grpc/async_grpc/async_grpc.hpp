@@ -53,12 +53,14 @@ namespace async_grpc {
   class Executor {
   public:
     Executor() = default;
-    explicit Executor(std::unique_ptr<grpc::CompletionQueue> cq);
+    Executor(std::unique_ptr<grpc::CompletionQueue> cq);
 
     bool Poll();
     void Shutdown();
 
     grpc::CompletionQueue* GetCq() const;
+
+    static bool Tick(grpc::CompletionQueue* cq);
 
   private:
     std::unique_ptr<grpc::CompletionQueue> m_cq;
@@ -69,7 +71,7 @@ namespace async_grpc {
   public:
     Alarm() = default;
 
-    Alarm(Executor& executor, TDeadline deadline)
+    Alarm(const Executor& executor, TDeadline deadline)
       : m_executor(&executor)
       , m_deadline(std::move(deadline))
     {}
@@ -87,24 +89,40 @@ namespace async_grpc {
     auto operator co_await() { return Start(); }
 
   private:
-    Executor* m_executor = nullptr;
+    const Executor* m_executor = nullptr;
     TDeadline m_deadline;
     grpc::Alarm m_alarm;
   };
 
   // A thread running an executor Poll loop
-  // The thread will stop when the associated executor is shut down
-  // The associated executor must live longer than the thread
+  template<std::derived_from<Executor> TExecutor>
   class ExecutorThread {
   public:
     ExecutorThread() = default;
-    explicit ExecutorThread(Executor& executor);
+    explicit ExecutorThread(TExecutor executor)
+      : m_executor(std::move(executor))
+      , m_thread([cq = m_executor.GetCq()]() { while (Executor::Tick(cq)); })
+    {}
 
-    ExecutorThread(ExecutorThread&&) = default;
+    ExecutorThread(ExecutorThread&& other) = default;
     ExecutorThread& operator=(ExecutorThread&&) = default;
-    ~ExecutorThread() = default;
+    
+    ~ExecutorThread() {
+      Shutdown();
+    }
+
+    void Shutdown() {
+      m_executor.Shutdown();
+    }
+
+    const TExecutor& GetExecutor() {
+      return m_executor;
+    }
 
   private:
+    TExecutor m_executor;
     std::jthread m_thread;
   };
+
+  using ClientExecutorThread = ExecutorThread<Executor>;
 }

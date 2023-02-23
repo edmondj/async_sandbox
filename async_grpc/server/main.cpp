@@ -17,4 +17,5 @@ int main() {
 
   std::cin.get();
   std::cout << "Shutting down" << std::endl;
+  server.Shutdown(std::chrono::system_clock::now() + std::chrono::seconds(30));
 }

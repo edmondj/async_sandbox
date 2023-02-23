@@ -10,7 +10,7 @@ namespace async_grpc {
     return static_cast<grpc::ServerCompletionQueue*>(GetCq());
   }
 
-  ServerContext::ServerContext(ServerExecutor& executor)
+  ServerContext::ServerContext(const ServerExecutor& executor)
     : executor(executor)
   {}
 
@@ -24,12 +24,9 @@ namespace async_grpc {
     for (IServiceImpl& service : m_options.services) {
       builder.RegisterService(service.GetGrpcService());
     }
-    // reserve is *needed*, to avoid moving references to executors that are used in executor threads
     m_executors.reserve(m_options.executorCount);
     for (size_t i = 0; i < m_options.executorCount; ++i) {
-      auto& executor = m_executors.emplace_back();
-      executor.executor = ServerExecutor(builder.AddCompletionQueue());
-      executor.thread = ExecutorThread(executor.executor);
+      m_executors.emplace_back(ServerExecutor(builder.AddCompletionQueue()));
     }
     m_server = builder.BuildAndStart();
 
@@ -39,9 +36,17 @@ namespace async_grpc {
   }
 
   Server::~Server() {
+    Shutdown();
+  }
+
+  void Server::Shutdown()
+  {
     m_server->Shutdown();
-    for (Executor& executor : m_executors) {
-      executor.executor.Shutdown();
-    }
+  }
+
+  const ServerExecutor& Server::GetNextExecutor()
+  {
+    // Round Robin on all executors, more algorithms possible
+    return m_executors[m_nextExecutor++ % m_executors.size()].GetExecutor();
   }
 }
