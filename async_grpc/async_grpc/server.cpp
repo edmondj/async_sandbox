@@ -3,11 +3,15 @@
 namespace async_grpc {
   
   ServerExecutor::ServerExecutor(std::unique_ptr<grpc::ServerCompletionQueue> cq)
-    : Executor(std::move(cq)) {
+    : m_cq(std::move(cq))
+  {}
+
+  grpc::CompletionQueue* ServerExecutor::GetCq() const {
+    return m_cq.get();
   }
 
   grpc::ServerCompletionQueue* ServerExecutor::GetNotifCq() const {
-    return static_cast<grpc::ServerCompletionQueue*>(GetCq());
+    return m_cq.get();
   }
 
   ServerContext::ServerContext(const ServerExecutor& executor)
@@ -44,7 +48,7 @@ namespace async_grpc {
     m_server->Shutdown();
   }
 
-  const ServerExecutor& Server::GetNextExecutor()
+  const ServerExecutor& Server::SelectNextExecutor()
   {
     // Round Robin on all executors, more algorithms possible
     return m_executors[m_nextExecutor++ % m_executors.size()].GetExecutor();

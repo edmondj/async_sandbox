@@ -5,10 +5,42 @@
 #include <coroutine>
 #include <memory>
 #include <grpcpp/grpcpp.h>
-#include "service_impl.hpp"
 #include "async_grpc.hpp"
 
 namespace async_grpc {
+  struct Server;
+
+  struct IServiceImpl {
+    virtual ~IServiceImpl() = default;
+
+    virtual grpc::Service* GetGrpcService() = 0;
+    virtual void StartListening(Server& server) = 0;
+  };
+
+  template<ServiceConcept TService>
+  class BaseServiceImpl : public IServiceImpl {
+  public:
+    using Service = TService;
+
+    virtual grpc::Service* GetGrpcService() final {
+      return &m_service;
+    }
+
+    typename Service::AsyncService& GetConcreteGrpcService() {
+      return m_service;
+    }
+
+  private:
+    typename TService::AsyncService m_service;
+  };
+
+  template<typename T>
+  concept ServiceImplConcept = std::derived_from<T, IServiceImpl>&& ServiceConcept<typename T::Service>&& requires(T t) {
+    { t.GetConcreteGrpcService() } -> std::same_as<typename T::Service::AsyncService&>;
+  };
+
+  template<typename T, typename TService>
+  concept AsyncServiceBase = ServiceImplConcept<TService> && std::derived_from<typename TService::Service::AsyncService, T>;
 
   struct ServerOptions {
     std::vector<std::string> addresses;
@@ -18,14 +50,17 @@ namespace async_grpc {
 
   using ServerListenCoroutine = Coroutine;
 
-  class ServerExecutor : public Executor {
+  class ServerExecutor {
   public:
     ServerExecutor() = default;
     explicit ServerExecutor(std::unique_ptr<grpc::ServerCompletionQueue> cq);
 
+    grpc::CompletionQueue* GetCq() const;
     grpc::ServerCompletionQueue* GetNotifCq() const;
-  };
 
+  private:
+    std::unique_ptr<grpc::ServerCompletionQueue> m_cq;
+  };
   using ServerExecutorThread = ExecutorThread<ServerExecutor>;
 
   class ServerContext {
@@ -286,7 +321,7 @@ namespace async_grpc {
 
   // ~Server Stream
 
-#define ASYNC_GRPC_SERVER_LISTEN_FUNC(service, method) &service::AsyncService::Request ## method
+#define ASYNC_GRPC_SERVER_LISTEN_FUNC(service, rpc) &service::AsyncService::Request ## rpc
 
   class Server {
   public:
@@ -297,28 +332,28 @@ namespace async_grpc {
 
     template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TServiceBase, ServerUnaryHandlerConcept<TRequest, TResponse> THandler>
     ServerListenCoroutine StartListeningUnary(TService& service, TUnaryListenFunc<TServiceBase, TRequest, TResponse> listenFunc, THandler handler) {
-      while (auto context = co_await ServerUnaryContext<TRequest, TResponse>::Listen(service, listenFunc, GetNextExecutor())) {
+      while (auto context = co_await ServerUnaryContext<TRequest, TResponse>::Listen(service, listenFunc, SelectNextExecutor())) {
         handler(std::move(context));
       }
     }
 
     template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TServiceBase, ServerClientStreamHandlerConcept<TRequest, TResponse> THandler>
     ServerListenCoroutine StartListeningClientStream(TService& service, TClientStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc, THandler handler) {
-      while (auto context = co_await ServerClientStreamContext<TRequest, TResponse>::Listen(service, listenFunc, GetNextExecutor())) {
+      while (auto context = co_await ServerClientStreamContext<TRequest, TResponse>::Listen(service, listenFunc, SelectNextExecutor())) {
         handler(std::move(context));
       }
     }
 
     template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TServiceBase, ServerServerStreamHandlerConcept<TRequest, TResponse> THandler>
     ServerListenCoroutine StartListeningServerStream(TService& service, TServerStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc, THandler handler) {
-      while (auto context = co_await ServerServerStreamContext<TRequest, TResponse>::Listen(service, listenFunc, GetNextExecutor())) {
+      while (auto context = co_await ServerServerStreamContext<TRequest, TResponse>::Listen(service, listenFunc, SelectNextExecutor())) {
         handler(std::move(context));
       }
     } 
 
     template<typename TRequest, typename TResponse, ServiceImplConcept TService, AsyncServiceBase<TService> TServiceBase, ServerBidirectionalStreamHandlerConcept<TRequest, TResponse> THandler>
     ServerListenCoroutine StartListeningBidirectionalStream(TService& service, TBidirectionalStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc, THandler handler) {
-      while (auto context = co_await ServerBidirectionalStreamContext<TRequest, TResponse>::Listen(service, listenFunc, GetNextExecutor())) {
+      while (auto context = co_await ServerBidirectionalStreamContext<TRequest, TResponse>::Listen(service, listenFunc, SelectNextExecutor())) {
         handler(std::move(context));
       }
     }
@@ -332,7 +367,7 @@ namespace async_grpc {
     }
 
   private:
-    const ServerExecutor& GetNextExecutor();
+    const ServerExecutor& SelectNextExecutor();
 
     ServerOptions m_options;
     std::unique_ptr<grpc::Server> m_server;

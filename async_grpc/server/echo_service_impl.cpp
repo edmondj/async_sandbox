@@ -1,4 +1,5 @@
 #include <cassert>
+#include <async_grpc/server.hpp>
 #include "echo_service_impl.hpp"
 
 static async_grpc::ServerUnaryCoroutine UnaryEchoImpl(std::unique_ptr<async_grpc::ServerUnaryContext<echo_service::UnaryEchoRequest, echo_service::UnaryEchoResponse>> context) {

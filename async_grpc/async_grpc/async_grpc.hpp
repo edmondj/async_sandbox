@@ -1,16 +1,19 @@
 #pragma once
 
-#include <cassert>
 #include <thread>
 #include <concepts>
+#include <coroutine>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/alarm.h>
 
 namespace async_grpc {
 
-  template<typename T>
-  concept ServiceConcept = std::derived_from<typename T::AsyncService, grpc::Service>;
+  const char* GrpcStatusCodeString(grpc::StatusCode code);
 
+  template<typename T>
+  concept ServiceConcept = std::derived_from<typename T::AsyncService, grpc::Service>&& requires {
+    typename T::Stub;
+  };
 
   struct Coroutine {
     struct promise_type {
@@ -50,20 +53,28 @@ namespace async_grpc {
     Coroutine::promise_type* m_promise = nullptr;
   };
 
-  class Executor {
+  template<typename T>
+  concept ExecutorConcept = std::move_constructible<T> && requires(const T executor) {
+    { executor.GetCq() } -> std::same_as<grpc::CompletionQueue*>;
+  };
+
+  bool CompletionQueueTick(grpc::CompletionQueue* cq);
+  void CompletionQueueShutdown(grpc::CompletionQueue* cq);
+
+  template<ExecutorConcept TExecutor>
+  class Executor : public TExecutor {
   public:
-    Executor() = default;
-    Executor(std::unique_ptr<grpc::CompletionQueue> cq);
+    Executor(TExecutor executor)
+      : TExecutor(std::move(executor))
+    {}
 
-    bool Poll();
-    void Shutdown();
+    bool Poll() {
+      return CompletionQueueTick(this->GetCq());
+    }
 
-    grpc::CompletionQueue* GetCq() const;
-
-    static bool Tick(grpc::CompletionQueue* cq);
-
-  private:
-    std::unique_ptr<grpc::CompletionQueue> m_cq;
+    void Shutdown() {
+      this->GetCq()->Shutdown();
+    }
   };
 
   template<typename TDeadline>
@@ -71,14 +82,15 @@ namespace async_grpc {
   public:
     Alarm() = default;
 
-    Alarm(const Executor& executor, TDeadline deadline)
-      : m_executor(&executor)
+    template<ExecutorConcept TExecutor>
+    Alarm(const TExecutor& executor, TDeadline deadline)
+      : m_cq(executor.GetCq())
       , m_deadline(std::move(deadline))
     {}
 
     auto Start() {
       return Awaitable([&](void* tag) {
-        m_alarm.Set(m_executor->GetCq(), m_deadline, tag);
+        m_alarm.Set(m_cq, m_deadline, tag);
       });
     }
 
@@ -89,19 +101,18 @@ namespace async_grpc {
     auto operator co_await() { return Start(); }
 
   private:
-    const Executor* m_executor = nullptr;
+    grpc::CompletionQueue* m_cq = nullptr;
     TDeadline m_deadline;
     grpc::Alarm m_alarm;
   };
 
   // A thread running an executor Poll loop
-  template<std::derived_from<Executor> TExecutor>
+  template<ExecutorConcept TExecutor>
   class ExecutorThread {
   public:
-    ExecutorThread() = default;
-    explicit ExecutorThread(TExecutor executor)
+    explicit ExecutorThread(TExecutor executor = {})
       : m_executor(std::move(executor))
-      , m_thread([cq = m_executor.GetCq()]() { while (Executor::Tick(cq)); })
+      , m_thread([cq = m_executor.GetCq()]() { while (CompletionQueueTick(cq)); })
     {}
 
     ExecutorThread(ExecutorThread&& other) = default;
@@ -112,7 +123,7 @@ namespace async_grpc {
     }
 
     void Shutdown() {
-      m_executor.Shutdown();
+      CompletionQueueShutdown(m_executor.GetCq());
     }
 
     const TExecutor& GetExecutor() {
@@ -123,6 +134,4 @@ namespace async_grpc {
     TExecutor m_executor;
     std::jthread m_thread;
   };
-
-  using ClientExecutorThread = ExecutorThread<Executor>;
 }

@@ -4,5 +4,6 @@ add_subdirectory("third_party")
 add_subdirectory("async_grpc")
 add_subdirectory("protos")
 add_subdirectory("server")
+add_subdirectory("client")
 
 organize_targets_in("async_grpc")
