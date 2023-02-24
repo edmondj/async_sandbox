@@ -1,34 +1,30 @@
 #include <iostream>
 #include <async_grpc/client.hpp>
 #include <protos/echo_service.grpc.pb.h>
+#include <protos/variable_service.grpc.pb.h>
 
-class EchoClient : public async_grpc::ClientBase<echo_service::EchoService> {
-public:
-  EchoClient(async_grpc::ChannelProvider channelProvider)
-    : async_grpc::ClientBase<echo_service::EchoService>(std::move(channelProvider))
-  {}
-
-  ASYNC_GRPC_CLIENT_UNARY(UnaryEcho)
-};
+using EchoClient = async_grpc::Client<echo_service::EchoService>;
+using VariableClient = async_grpc::Client<variable_service::VariableService>;
 
 class Program {
 public:
   Program(const std::shared_ptr<grpc::Channel>& channel)
     : m_echo(channel)
+    , m_variable(channel)
   {
-#define ADD_HANDLER(client, rpc) m_handlers.insert_or_assign(std::string(client::Service::service_full_name()) + '.' + #rpc, &Program::Handle ## rpc)
-    ADD_HANDLER(EchoClient, UnaryEcho);
+#define ADD_HANDLER(command) m_handlers.insert_or_assign(#command, &Program::command)
+    ADD_HANDLER(UnaryEcho);
 #undef ADD_HANDLER
   }
 
   void Process(std::string_view line) {
     for (const auto& [name, handler] : m_handlers) {
       if (line.starts_with(name)) {
-        (this->*handler)(name, line.substr(std::min(line.size(), name.size() + 1)));
+        (this->*handler)();
         return;
       }
     }
-    std::cout << "Unknown RPC" << std::endl;
+    std::cout << "Unknown command" << std::endl;
   }
 
 private:
@@ -45,14 +41,14 @@ private:
     return false;
   }
 
-  async_grpc::Coroutine HandleUnaryEcho(std::string_view rpc, std::string_view command) {
-    grpc::ClientContext context;
+  async_grpc::Coroutine UnaryEcho() {
     echo_service::UnaryEchoRequest request;
-    request.set_message(std::string(command));
+    request.set_message("hello");
 
     echo_service::UnaryEchoResponse response;
     grpc::Status status;
-    if (co_await m_echo.UnaryEcho(m_executor.GetExecutor(), context, request, response, status)) {
+    std::unique_ptr<grpc::ClientContext> context;
+    if (co_await m_echo.AutoRetryUnary(ASYNC_GRPC_CLIENT_START_FUNC(EchoClient, UnaryEcho), m_executor.GetExecutor(), context, request, response, status)) {
       LogTimestamp();
       if (LogStatus(status)) {
         std::cout << response.message() << std::endl;
@@ -61,8 +57,9 @@ private:
   }
 
   EchoClient m_echo;
+  VariableClient m_variable;
   async_grpc::ClientExecutorThread m_executor;
-  using THandler = async_grpc::Coroutine(Program::*)(std::string_view, std::string_view);
+  using THandler = async_grpc::Coroutine(Program::*)();
   std::map<std::string, THandler> m_handlers;
 };
 

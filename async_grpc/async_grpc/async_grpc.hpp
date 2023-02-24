@@ -93,7 +93,12 @@ namespace async_grpc {
     }
   };
 
-  template<typename TDeadline>
+  template<typename T>
+  concept TimePointConcept = requires(grpc::Alarm a, grpc::CompletionQueue * cq, T t, void* tag) {
+    { a.Set(cq, t, tag) };
+  };
+
+  template<TimePointConcept TDeadline>
   class Alarm {
   public:
     Alarm() = default;

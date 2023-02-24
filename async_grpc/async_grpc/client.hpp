@@ -36,7 +36,43 @@ namespace async_grpc {
     std::atomic<size_t> m_nextChannel{ 0 };
   };
 
-#define ASYNC_GRPC_CLIENT_START_FUNC(service, rpc) &service::Stub::Async ## rpc
+  template<typename T>
+  concept RetryPolicyConcept = requires(T t, const grpc::Status& status) {
+    { static_cast<bool>(t(status)) };
+    { *t(status) } -> TimePointConcept;
+  };
+
+  class DefaultRetryPolicy {
+  public:
+    std::optional<std::chrono::system_clock::time_point> operator()(const grpc::Status& status);
+
+  private:
+    size_t m_retryCount = 0;
+  };
+  static_assert(RetryPolicyConcept<DefaultRetryPolicy>);
+
+  template<typename T>
+  concept ClientContextProviderConcept = requires(T t) {
+    { t() } -> std::same_as<std::unique_ptr<grpc::ClientContext>>;
+  };
+
+  struct DefaultClientContextProvider {
+    std::unique_ptr<grpc::ClientContext> operator()();
+  };
+
+  template<typename T>
+  concept RetryOptionsConcept = requires(T t) {
+    { t.retryPolicy } -> RetryPolicyConcept;
+    { t.contextProvider } -> ClientContextProviderConcept;
+  };
+
+  template<RetryPolicyConcept TRetry, ClientContextProviderConcept TContext>
+  struct RetryOptions {
+    TRetry retryPolicy;
+    TContext contextProvider;
+  };
+  using DefaultRetryOptions = RetryOptions<DefaultRetryPolicy, DefaultClientContextProvider>;
+  static_assert(RetryOptionsConcept<DefaultRetryOptions>);
 
   // Unary
   
@@ -85,25 +121,50 @@ namespace async_grpc {
 
   // ~Unary
 
+#define ASYNC_GRPC_CLIENT_START_FUNC(client, rpc) &client::Service::Stub::Async ## rpc
+
   template<ServiceConcept TService>
-  class ClientBase {
+  class Client {
   public:
     using Service = TService;
 
-    ClientBase(ChannelProvider channelProvider)
+    Client(ChannelProvider channelProvider)
       : m_channelProvider(std::move(channelProvider))
     {}
 
-    // These must be put invoked inside the definition of a class that inherits ClientBase<service>
-#define ASYNC_GRPC_CLIENT_UNARY(rpc) \
-    inline auto rpc(const ::async_grpc::ClientExecutor& executor, ::grpc::ClientContext& context, const typename ::async_grpc::TStartUnaryFuncTrait<decltype(ASYNC_GRPC_CLIENT_START_FUNC(Service, rpc))>::Request& request) {\
-      return ClientStartUnary(typename Service::Stub(m_channelProvider.SelectNextChannel()), ASYNC_GRPC_CLIENT_START_FUNC(Service, rpc), executor, context, request); \
-    }\
-    inline auto rpc(const ::async_grpc::ClientExecutor& executor, ::grpc::ClientContext& context, const typename ::async_grpc::TStartUnaryFuncTrait<decltype(ASYNC_GRPC_CLIENT_START_FUNC(Service, rpc))>::Request& request, typename ::async_grpc::TStartUnaryFuncTrait<decltype(ASYNC_GRPC_CLIENT_START_FUNC(Service, rpc))>::Response& response, grpc::Status& status) {\
-      return ClientStartUnary(typename Service::Stub(m_channelProvider.SelectNextChannel()), ASYNC_GRPC_CLIENT_START_FUNC(Service, rpc), executor, context, request, response, status); \
+    template<typename TRequest, typename TResponse>
+    ClientUnaryContext<TResponse> StartUnary(TStartUnaryFunc<typename Service::Stub, TRequest, TResponse> func, const ClientExecutor& executor, grpc::ClientContext& context, const TRequest& request) {
+      return ClientUnaryContext(executor, (MakeStub().*func)(&context, request, executor.GetCq()));
+    }
+
+    template<typename TRequest, typename TResponse>
+    Coroutine CallUnary(TStartUnaryFunc<typename Service::Stub, TRequest, TResponse> func, const ClientExecutor& executor, grpc::ClientContext& context, const TRequest& request, TResponse& response, grpc::Status& status) {
+      co_await StartUnary(func, executor, context, request).Finish(response, status);
+    }
+
+    template<typename TRequest, typename TResponse, RetryOptionsConcept TRetryOptions = DefaultRetryOptions>
+    Coroutine AutoRetryUnary(TStartUnaryFunc<typename Service::Stub, TRequest, TResponse> func, const ClientExecutor& executor, std::unique_ptr<grpc::ClientContext>& context, const TRequest& request, TResponse& response, grpc::Status& status, TRetryOptions retryOptions = {}) {
+      while (true) {
+        context = retryOptions.contextProvider();
+        if (!co_await CallUnary(func, executor, *context, request, response, status)) {
+          break;
+        }
+        if (status.ok()) {
+          break;
+        }
+        if (auto shouldRetry = retryOptions.retryPolicy(status); shouldRetry) {
+          co_await Alarm(executor, *shouldRetry);
+        } else {
+          break;
+        }
+      }
     }
 
   protected:
     ChannelProvider m_channelProvider;
+
+    typename Service::Stub MakeStub() {
+      return Service::Stub(m_channelProvider.SelectNextChannel());
+    }
   };
 }
