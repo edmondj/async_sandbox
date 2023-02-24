@@ -89,7 +89,7 @@ namespace async_grpc {
     }
 
     std::unique_ptr<TContext> await_resume() {
-      if (m_promise->lastOk) {
+      if (m_promise->cancelled) {
         return std::move(m_context);
       }
       return nullptr;

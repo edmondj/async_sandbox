@@ -34,7 +34,7 @@ namespace async_grpc {
       return false;
     }
     auto h = std::coroutine_handle<Coroutine::promise_type>::from_address(tag);
-    h.promise().lastOk = ok;
+    h.promise().cancelled = ok;
     h.resume();
     if (h.done()) {
       h.destroy();

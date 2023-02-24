@@ -23,6 +23,7 @@ public:
 #define ADD_HANDLER(command) m_handlers.insert_or_assign(#command, &Program::command)
     ADD_HANDLER(UnaryEcho);
     ADD_HANDLER(ClientStreamEcho);
+    ADD_HANDLER(ServerStreamEcho);
 #undef ADD_HANDLER
   }
 
@@ -66,7 +67,7 @@ private:
     Log() << "start" << std::endl;
     echo_service::ClientStreamEchoResponse response;
     grpc::ClientContext context;
-    auto call = co_await m_echo.PrepareClientStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, ClientStreamEcho), m_executor.GetExecutor(), context, response);
+    auto call = co_await m_echo.CallClientStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, ClientStreamEcho), m_executor.GetExecutor(), context, response);
     if (!call) {
       Log() << "start cancelled" << std::endl;
       co_return;
@@ -96,6 +97,34 @@ private:
         }
         out << std::endl;
       }
+    }
+    Log() << "end" << std::endl;
+  }
+
+  async_grpc::Coroutine ServerStreamEcho() {
+    Log() << "start" << std::endl;
+    echo_service::ServerStreamEchoRequest request;
+    request.set_message("hola");
+    request.set_count(3);
+    request.set_delay_ms(1000);
+    grpc::ClientContext context;
+    auto call = co_await m_echo.CallServerStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, ServerStreamEcho), m_executor.GetExecutor(), context, request);
+    if (!call) {
+      Log() << "start cancelled" << std::endl;
+      co_return;
+    }
+    echo_service::ServerStreamEchoResponse response;
+    Log() << "start read" << std::endl;
+    while (co_await call->Read(response)) {
+      Log() << response.message() << std::endl;
+    }
+    Log() << "done read" << std::endl;
+    grpc::Status status;
+    if (!co_await call->Finish(status)) {
+      Log() << "finish cancelled" << std::endl;
+    }
+    else {
+      Log() << status << std::endl;
     }
     Log() << "end" << std::endl;
   }

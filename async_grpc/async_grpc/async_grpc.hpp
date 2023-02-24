@@ -23,7 +23,7 @@ namespace async_grpc {
       inline std::suspend_never initial_suspend() noexcept { return {}; };
       inline std::suspend_always final_suspend() noexcept {
         if (next) {
-          next.promise().lastOk = lastOk;
+          next.promise().cancelled = cancelled;
           next.resume();
         }
         return {};
@@ -31,7 +31,7 @@ namespace async_grpc {
       void return_void() {}
       void unhandled_exception() {}
 
-      bool lastOk = false;
+      bool cancelled = false;
       std::coroutine_handle<Coroutine::promise_type> next;
     };
 
@@ -39,7 +39,7 @@ namespace async_grpc {
     inline void await_suspend(std::coroutine_handle<Coroutine::promise_type> next) {
       promise->next = next;
     }
-    inline bool await_resume() { return promise->lastOk; }
+    inline bool await_resume() { return promise->cancelled; }
 
     promise_type* promise;
 
@@ -73,7 +73,7 @@ namespace async_grpc {
     }
 
     bool await_resume() {
-      return m_promise->lastOk;
+      return m_promise->cancelled;
     }
 
   private:

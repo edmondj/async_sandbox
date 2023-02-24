@@ -99,7 +99,7 @@ namespace async_grpc {
   };
 
   template<typename TResponse>
-  class ClientUnaryAwaitable {
+  class [[nodiscard]] ClientUnaryAwaitable {
   public:
     ClientUnaryAwaitable(const ClientExecutor& executor, std::unique_ptr<grpc::ClientAsyncResponseReader<TResponse>> reader)
       : m_executor(executor)
@@ -162,7 +162,7 @@ namespace async_grpc {
   };
 
   template<typename TRequest>
-  class ClientClientStreamAwaitable {
+  class [[nodiscard]] ClientClientStreamAwaitable {
   public:
     ClientClientStreamAwaitable(const ClientExecutor& executor, std::unique_ptr<grpc::ClientAsyncWriter<TRequest>> writer)
       : m_executor(executor)
@@ -175,7 +175,7 @@ namespace async_grpc {
       m_writer->StartCall(h.address());
     }
     std::optional<ClientClientStreamCall<TRequest>> await_resume() {
-      if (!m_promise->lastOk) {
+      if (!m_promise->cancelled) {
         return std::nullopt;
       }
       return ClientClientStreamCall<TRequest>(m_executor, std::move(m_writer));
@@ -189,6 +189,66 @@ namespace async_grpc {
 
   // ~Client Stream
 
+  // Server Stream
+
+  template<typename TStub, typename TRequest, typename TResponse>
+  using TPrepareServerStreamFunc = std::unique_ptr<grpc::ClientAsyncReader<TResponse>>(TStub::*)(grpc::ClientContext*, const TRequest&, grpc::CompletionQueue*);
+
+  template<typename TResponse>
+  class [[nodiscard]] ClientServerStreamCall : public ClientCall {
+  public:
+
+    ClientServerStreamCall(const ClientExecutor& executor, std::unique_ptr<grpc::ClientAsyncReader<TResponse>> reader)
+      : ClientCall(executor)
+      , m_reader(std::move(reader))
+    {}
+
+    auto Read(TResponse& response) {
+      return Awaitable([&](void* tag) {
+        m_reader->Read(&response, tag);
+      });
+    }
+
+    auto Finish(grpc::Status& status) {
+      return Awaitable([&](void* tag) {
+        m_reader->Finish(&status, tag);
+      });
+    }
+
+  private:
+    std::unique_ptr<grpc::ClientAsyncReader<TResponse>> m_reader;
+  };
+
+  template<typename TResponse>
+  class [[nodiscard]] ClientServerStreamAwaitable {
+  public:
+    ClientServerStreamAwaitable(const ClientExecutor& executor, std::unique_ptr<grpc::ClientAsyncReader<TResponse>> reader)
+      : m_executor(executor)
+      , m_reader(std::move(reader))
+    {}
+
+    bool await_ready() { return false; }
+    
+    void await_suspend(std::coroutine_handle<Coroutine::promise_type> h) {
+      m_promise = &h.promise();
+      m_reader->StartCall(h.address());
+    }
+    
+    std::optional<ClientServerStreamCall<TResponse>> await_resume() {
+      if (!m_promise->cancelled) {
+        return std::nullopt;
+      }
+      return ClientServerStreamCall<TResponse>(m_executor, std::move(m_reader));
+    }
+
+  private:
+    const ClientExecutor& m_executor;
+    Coroutine::promise_type* m_promise = nullptr;
+    std::unique_ptr<grpc::ClientAsyncReader<TResponse>> m_reader;
+  };
+
+  // ~Server Stream
+
 #define ASYNC_GRPC_CLIENT_PREPARE_FUNC(client, rpc) &client::Service::Stub::PrepareAsync ## rpc
 
   template<ServiceConcept TService>
@@ -201,13 +261,13 @@ namespace async_grpc {
     {}
 
     template<typename TRequest, typename TResponse>
-    ClientUnaryAwaitable<TResponse> StartUnary(TPrepareUnaryFunc<typename Service::Stub, TRequest, TResponse> func, const ClientExecutor& executor, grpc::ClientContext& context, const TRequest& request) {
+    auto CallUnary(TPrepareUnaryFunc<typename Service::Stub, TRequest, TResponse> func, const ClientExecutor& executor, grpc::ClientContext& context, const TRequest& request) {
       return ClientUnaryAwaitable(executor, (MakeStub().*func)(&context, request, executor.GetCq()));
     }
 
     template<typename TRequest, typename TResponse>
     Coroutine CallUnary(TPrepareUnaryFunc<typename Service::Stub, TRequest, TResponse> func, const ClientExecutor& executor, grpc::ClientContext& context, const TRequest& request, TResponse& response, grpc::Status& status) {
-      auto call = co_await StartUnary(func, executor, context, request);
+      auto call = co_await CallUnary(func, executor, context, request);
       co_await call.Finish(response, status);
     }
 
@@ -230,8 +290,13 @@ namespace async_grpc {
     }
 
     template<typename TRequest, typename TResponse>
-    ClientClientStreamAwaitable<TRequest> PrepareClientStream(TPrepareClientStreamFunc<typename Service::Stub, TRequest, TResponse> func, const ClientExecutor& executor, grpc::ClientContext& context, TResponse& response) {
-      return ClientClientStreamAwaitable<TRequest>(executor, (MakeStub().*func)(&context, &response, executor.GetCq()));
+    auto CallClientStream(TPrepareClientStreamFunc<typename Service::Stub, TRequest, TResponse> func, const ClientExecutor& executor, grpc::ClientContext& context, TResponse& response) {
+      return ClientClientStreamAwaitable(executor, (MakeStub().*func)(&context, &response, executor.GetCq()));
+    }
+
+    template<typename TRequest, typename TResponse>
+    auto CallServerStream(TPrepareServerStreamFunc<typename Service::Stub, TRequest, TResponse> func, const ClientExecutor& executor, grpc::ClientContext& context, const TRequest& request) {
+      return ClientServerStreamAwaitable(executor, (MakeStub().*func)(&context, request, executor.GetCq()));
     }
 
   protected:
