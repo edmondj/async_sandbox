@@ -24,6 +24,7 @@ public:
     ADD_HANDLER(UnaryEcho);
     ADD_HANDLER(ClientStreamEcho);
     ADD_HANDLER(ServerStreamEcho);
+    ADD_HANDLER(BidirectionalStreamEcho);
 #undef ADD_HANDLER
   }
 
@@ -116,7 +117,7 @@ private:
     echo_service::ServerStreamEchoResponse response;
     Log() << "start read" << std::endl;
     while (co_await call->Read(response)) {
-      Log() << response.message() << std::endl;
+      Log() << response.message() << ' ' << response.n() << std::endl;
     }
     Log() << "done read" << std::endl;
     grpc::Status status;
@@ -126,6 +127,56 @@ private:
     else {
       Log() << status << std::endl;
     }
+    Log() << "end" << std::endl;
+  }
+
+  async_grpc::Coroutine BidirectionalStreamEcho() {
+    Log() << "start" << std::endl;
+    grpc::ClientContext context;
+    auto call = co_await m_echo.CallBidirectionalStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, BidirectionalStreamEcho), m_executor.GetExecutor(), context);
+    if (!call) {
+      Log() << "start cancelled" << std::endl;
+      co_return;
+    }
+    auto readCoroutine = [&]() -> async_grpc::Coroutine {
+      echo_service::BidirectionalStreamEchoResponse response;
+      while (co_await call->Read(response)) {
+        Log() << response.message() << std::endl;
+      }
+      Log() << "read done" << std::endl;
+    }();
+    echo_service::BidirectionalStreamEchoRequest request;
+    auto* message = request.mutable_message();
+    message->set_message("guten tag");
+    message->set_delay_ms(1000);
+    Log() << "write message" << std::endl;
+    if (!co_await call->Write(request)) {
+      Log() << "write cancelled" << std::endl;
+      co_return;
+    }
+    request.mutable_start();
+    Log() << "write start" << std::endl;
+    if (!co_await call->Write(request)) {
+      Log() << "write cancelled" << std::endl;
+      co_return;
+    }
+    Log() << "wait" << std::endl;
+    if (!co_await async_grpc::Alarm(m_executor.GetExecutor(), std::chrono::system_clock::now() + std::chrono::milliseconds(3500))) {
+      Log() << "wait cancelled" << std::endl;
+      co_return;
+    }
+    request.mutable_stop();
+    Log() << "write stop" << std::endl;
+    if (!co_await call->Write(request)) {
+      Log() << "write cancelled" << std::endl;
+      co_return;
+    }
+    if (!co_await call->WritesDone()) {
+      Log() << "writes done cancelled" << std::endl;
+      co_return;
+    }
+    Log() << "wait read" << std::endl;
+    co_await readCoroutine;
     Log() << "end" << std::endl;
   }
 
