@@ -11,3 +11,4 @@
 target_link_libraries(async_grpc
   PUBLIC libprotobuf grpc grpc++
 )
+setup_target_compile_options(async_grpc)

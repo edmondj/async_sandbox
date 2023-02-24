@@ -11,3 +11,4 @@ target_link_libraries(server
 target_include_directories(server
   PRIVATE "$<TARGET_PROPERTY:async_grpc,SOURCE_DIR>/.." "$<TARGET_PROPERTY:protos,BINARY_DIR>/.."
 )
+setup_target_compile_options(server)

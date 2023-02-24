@@ -15,6 +15,7 @@ namespace async_grpc {
     typename T::Stub;
   };
 
+  // Can either be fire and forget or co_await'ed
   class Coroutine {
   public:
     struct promise_type {
@@ -41,6 +42,17 @@ namespace async_grpc {
     inline bool await_resume() { return promise->lastOk; }
 
     promise_type* promise;
+
+    inline Coroutine(promise_type* promise)
+      : promise(promise)
+    {}
+
+  private:
+    Coroutine() = delete;
+    Coroutine(const Coroutine&) = delete;
+    Coroutine(Coroutine&&) = delete;
+    Coroutine& operator=(const Coroutine&) = delete;
+    Coroutine& operator=(Coroutine&&) = delete;
   };
 
   // TFunc must be calling an action queuing the provided tag to a completion queue managed by CompletionQueueThread

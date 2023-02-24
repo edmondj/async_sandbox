@@ -26,4 +26,12 @@ function(organize_targets_in FOLDER_NAME)
   organize_targets_in_rec(${FOLDER_NAME} ${CMAKE_CURRENT_SOURCE_DIR})
 endfunction()
 
+function(setup_target_compile_options t)
+	if (MSVC)
+		target_compile_options(${t} INTERFACE "/WX")
+	elseif (CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)")
+		target_compile_options(${t} INTERFACE "-Wextra" "-Werror")
+	endif ()
+endfunction()
+
 add_subdirectory("async_grpc")
