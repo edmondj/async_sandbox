@@ -15,16 +15,32 @@ namespace async_grpc {
     typename T::Stub;
   };
 
-  struct Coroutine {
+  class Coroutine {
+  public:
     struct promise_type {
-      bool lastOk = false;
-
-      inline Coroutine get_return_object() { return {}; }
+      inline Coroutine get_return_object() { return {this}; }
       inline std::suspend_never initial_suspend() noexcept { return {}; };
-      inline std::suspend_always final_suspend() noexcept { return {}; };
+      inline std::suspend_always final_suspend() noexcept {
+        if (next) {
+          next.promise().lastOk = lastOk;
+          next.resume();
+        }
+        return {};
+      };
       void return_void() {}
       void unhandled_exception() {}
+
+      bool lastOk = false;
+      std::coroutine_handle<Coroutine::promise_type> next;
     };
+
+    inline bool await_ready() { return false; }
+    inline void await_suspend(std::coroutine_handle<Coroutine::promise_type> next) {
+      promise->next = next;
+    }
+    inline bool await_resume() { return promise->lastOk; }
+
+    promise_type* promise;
   };
 
   // TFunc must be calling an action queuing the provided tag to a completion queue managed by CompletionQueueThread

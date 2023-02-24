@@ -49,11 +49,10 @@ private:
     grpc::ClientContext context;
     echo_service::UnaryEchoRequest request;
     request.set_message(std::string(command));
-    auto call = m_echo.UnaryEcho(m_executor.GetExecutor(), context, request);
 
     echo_service::UnaryEchoResponse response;
     grpc::Status status;
-    if (co_await call.Finish(response, status)) {
+    if (co_await m_echo.UnaryEcho(m_executor.GetExecutor(), context, request, response, status)) {
       LogTimestamp();
       if (LogStatus(status)) {
         std::cout << response.message() << std::endl;

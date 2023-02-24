@@ -67,6 +67,12 @@ namespace async_grpc {
     return ClientUnaryContext<TResponse>(executor, (stub.*func)(&context, request, executor.GetCq()));
   }
 
+  template<typename TStub, typename TRequest, typename TResponse>
+  Coroutine ClientStartUnary(TStub&& stub, TStartUnaryFunc<TStub, TRequest, TResponse> func, const ClientExecutor& executor, grpc::ClientContext& context, const TRequest& request, TResponse& response, grpc::Status& status) {
+    ClientUnaryContext<TResponse> call(executor, (stub.*func)(&context, request, executor.GetCq()));
+    co_await call.Finish(response, status);
+  }
+
   template<typename TStub>
   struct TStartUnaryFuncTrait;
 
@@ -92,6 +98,9 @@ namespace async_grpc {
 #define ASYNC_GRPC_CLIENT_UNARY(rpc) \
     inline auto rpc(const ::async_grpc::ClientExecutor& executor, ::grpc::ClientContext& context, const typename ::async_grpc::TStartUnaryFuncTrait<decltype(ASYNC_GRPC_CLIENT_START_FUNC(Service, rpc))>::Request& request) {\
       return ClientStartUnary(typename Service::Stub(m_channelProvider.SelectNextChannel()), ASYNC_GRPC_CLIENT_START_FUNC(Service, rpc), executor, context, request); \
+    }\
+    inline auto rpc(const ::async_grpc::ClientExecutor& executor, ::grpc::ClientContext& context, const typename ::async_grpc::TStartUnaryFuncTrait<decltype(ASYNC_GRPC_CLIENT_START_FUNC(Service, rpc))>::Request& request, typename ::async_grpc::TStartUnaryFuncTrait<decltype(ASYNC_GRPC_CLIENT_START_FUNC(Service, rpc))>::Response& response, grpc::Status& status) {\
+      return ClientStartUnary(typename Service::Stub(m_channelProvider.SelectNextChannel()), ASYNC_GRPC_CLIENT_START_FUNC(Service, rpc), executor, context, request, response, status); \
     }
 
   protected:
