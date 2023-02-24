@@ -11,7 +11,7 @@ namespace async_grpc {
     return m_cq.get();
   }
 
-  ClientContext::ClientContext(const ClientExecutor& executor) noexcept
+  ClientCall::ClientCall(const ClientExecutor& executor) noexcept
     : executor(executor)
   {}
 

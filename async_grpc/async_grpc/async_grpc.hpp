@@ -8,7 +8,7 @@
 
 namespace async_grpc {
 
-  const char* GrpcStatusCodeString(grpc::StatusCode code);
+  const char* StatusCodeString(grpc::StatusCode code);
 
   template<typename T>
   concept ServiceConcept = std::derived_from<typename T::AsyncService, grpc::Service>&& requires {
@@ -45,7 +45,7 @@ namespace async_grpc {
 
   // TFunc must be calling an action queuing the provided tag to a completion queue managed by CompletionQueueThread
   template<std::invocable<void*> TFunc>
-  class Awaitable {
+  class [[nodiscard]] Awaitable {
   public:
     Awaitable(TFunc func)
       : m_func(std::move(func))

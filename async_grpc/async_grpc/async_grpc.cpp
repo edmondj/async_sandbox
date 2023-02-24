@@ -3,7 +3,7 @@
 
 namespace async_grpc {
   
-  const char* GrpcStatusCodeString(grpc::StatusCode code) {
+  const char* StatusCodeString(grpc::StatusCode code) {
     switch (code) {
     case grpc::StatusCode::OK: return "OK";
     case grpc::StatusCode::CANCELLED: return "CANCELLED";
