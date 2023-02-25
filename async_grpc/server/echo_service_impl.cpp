@@ -55,7 +55,7 @@ static async_grpc::ServerBidirectionalStreamCoroutine BidirectionalStreamEchoImp
         co_await context->Finish(grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Can not start with invalid message set"));
         co_return;
       }
-      [&]() -> async_grpc::Coroutine {
+      async_grpc::Coroutine::Spawn([&]() -> async_grpc::Coroutine {
         while (true) {
           alarm = async_grpc::Alarm(context->executor, std::chrono::system_clock::now() + std::chrono::milliseconds(delay_ms));
           if (!co_await alarm) {
@@ -65,7 +65,7 @@ static async_grpc::ServerBidirectionalStreamCoroutine BidirectionalStreamEchoImp
             break;
           }
         }
-      }();
+      }());
       running = true;
       break;
     }
@@ -88,8 +88,8 @@ static async_grpc::ServerBidirectionalStreamCoroutine BidirectionalStreamEchoImp
 
 void EchoServiceImpl::StartListening(async_grpc::Server& server)
 {
-  server.StartListeningUnary(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, UnaryEcho), &UnaryEchoImpl);
-  server.StartListeningClientStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, ClientStreamEcho), &ClientStreamEchoImpl);
-  server.StartListeningServerStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, ServerStreamEcho), &ServerStreamEchoImpl);
-  server.StartListeningBidirectionalStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, BidirectionalStreamEcho), &BidirectionalStreamEchoImpl);
+  async_grpc::Coroutine::Spawn(server.StartListeningUnary(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, UnaryEcho), &UnaryEchoImpl));
+  async_grpc::Coroutine::Spawn(server.StartListeningClientStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, ClientStreamEcho), &ClientStreamEchoImpl));
+  async_grpc::Coroutine::Spawn(server.StartListeningServerStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, ServerStreamEcho), &ServerStreamEchoImpl));
+  async_grpc::Coroutine::Spawn(server.StartListeningBidirectionalStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, BidirectionalStreamEcho), &BidirectionalStreamEchoImpl));
 }

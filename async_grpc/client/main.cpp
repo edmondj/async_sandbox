@@ -31,7 +31,7 @@ public:
   void Process(std::string_view line) {
     for (const auto& [name, handler] : m_handlers) {
       if (line.starts_with(name)) {
-        (this->*handler)();
+        async_grpc::Coroutine::Spawn((this->*handler)());
         return;
       }
     }

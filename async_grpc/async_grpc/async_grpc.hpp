@@ -3,6 +3,7 @@
 #include <thread>
 #include <concepts>
 #include <coroutine>
+#include <variant>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/alarm.h>
 
@@ -15,44 +16,55 @@ namespace async_grpc {
     typename T::Stub;
   };
 
-  // Can either be fire and forget or co_await'ed
-  class Coroutine {
+  // Must be either co_await'ed or given to Spawn
+  class [[nodiscard]] Coroutine {
   public:
     struct promise_type {
-      inline Coroutine get_return_object() { return {this}; }
+      inline Coroutine get_return_object() { return {*this}; }
       inline std::suspend_never initial_suspend() noexcept { return {}; };
       inline std::suspend_always final_suspend() noexcept {
-        if (next) {
-          next.promise().cancelled = cancelled;
-          next.resume();
-        }
+        std::visit([&]<typename T>(T& next) {
+          if (next) {
+            if constexpr (std::is_same_v<T, std::coroutine_handle<promise_type>>) {
+              next.promise().cancelled = cancelled;
+            }
+            next.resume();
+          }
+        }, next);
         return {};
       };
       void return_void() {}
       void unhandled_exception() {}
 
       bool cancelled = false;
-      std::coroutine_handle<Coroutine::promise_type> next;
+      std::variant<std::coroutine_handle<promise_type>, std::coroutine_handle<>> next;
     };
 
     inline bool await_ready() { return false; }
     inline void await_suspend(std::coroutine_handle<Coroutine::promise_type> next) {
-      promise->next = next;
+      m_promise.next = next;
     }
-    inline bool await_resume() { return promise->cancelled; }
+    inline bool await_resume() { return !m_promise.cancelled; }
 
-    promise_type* promise;
-
-    inline Coroutine(promise_type* promise)
-      : promise(promise)
-    {}
+    inline static void Spawn(Coroutine&& c) {
+      auto h = std::coroutine_handle<promise_type>::from_promise(c.m_promise);
+      if (h.done()) {
+        h.destroy();
+      }
+    }
 
   private:
+    inline Coroutine(promise_type& promise)
+      : m_promise(promise)
+    {}
+
     Coroutine() = delete;
     Coroutine(const Coroutine&) = delete;
     Coroutine(Coroutine&&) = delete;
     Coroutine& operator=(const Coroutine&) = delete;
     Coroutine& operator=(Coroutine&&) = delete;
+
+    promise_type& m_promise;
   };
 
   // TFunc must be calling an action queuing the provided tag to a completion queue managed by CompletionQueueThread
@@ -73,7 +85,7 @@ namespace async_grpc {
     }
 
     bool await_resume() {
-      return m_promise->cancelled;
+      return !m_promise->cancelled;
     }
 
   private:

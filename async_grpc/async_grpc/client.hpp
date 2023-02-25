@@ -175,7 +175,7 @@ namespace async_grpc {
       m_writer->StartCall(h.address());
     }
     std::optional<ClientClientStreamCall<TRequest>> await_resume() {
-      if (!m_promise->cancelled) {
+      if (m_promise->cancelled) {
         return std::nullopt;
       }
       return ClientClientStreamCall<TRequest>(m_executor, std::move(m_writer));
@@ -235,7 +235,7 @@ namespace async_grpc {
     }
     
     std::optional<ClientServerStreamCall<TResponse>> await_resume() {
-      if (!m_promise->cancelled) {
+      if (m_promise->cancelled) {
         return std::nullopt;
       }
       return ClientServerStreamCall<TResponse>(m_executor, std::move(m_reader));
@@ -313,7 +313,7 @@ namespace async_grpc {
     }
 
     std::optional<ClientBidirectionalStreamCall<TRequest, TResponse>> await_resume() {
-      if (!m_promise->cancelled) {
+      if (m_promise->cancelled) {
         return std::nullopt;
       }
       return ClientBidirectionalStreamCall<TRequest, TResponse>(m_executor, std::move(m_readerWriter));

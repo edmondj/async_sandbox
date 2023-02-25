@@ -2,9 +2,9 @@
 #include <functional>
 
 void VariableServiceImpl::StartListening(async_grpc::Server& server) {
-  server.StartListeningUnary(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, Write), std::bind_front(&VariableServiceImpl::WriteImpl, this));
-  server.StartListeningUnary(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, Read), std::bind_front(&VariableServiceImpl::ReadImpl, this));
-  server.StartListeningUnary(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, Del), std::bind_front(&VariableServiceImpl::DelImpl, this));
+  async_grpc::Coroutine::Spawn(server.StartListeningUnary(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, Write), std::bind_front(&VariableServiceImpl::WriteImpl, this)));
+  async_grpc::Coroutine::Spawn(server.StartListeningUnary(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, Read), std::bind_front(&VariableServiceImpl::ReadImpl, this)));
+  async_grpc::Coroutine::Spawn(server.StartListeningUnary(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, Del), std::bind_front(&VariableServiceImpl::DelImpl, this)));
 }
 
 async_grpc::ServerUnaryCoroutine VariableServiceImpl::WriteImpl(std::unique_ptr<async_grpc::ServerUnaryContext<variable_service::WriteRequest, variable_service::WriteResponse>> context) {
