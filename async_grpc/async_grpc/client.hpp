@@ -1,6 +1,7 @@
 #pragma once
 
 #include "async_grpc.hpp"
+#include <optional>
 
 namespace async_grpc {
 
@@ -68,9 +69,19 @@ namespace async_grpc {
 
   template<RetryPolicyConcept TRetry, ClientContextProviderConcept TContext>
   struct RetryOptions {
+    RetryOptions() = default;
+
+    RetryOptions(TRetry retryPolicy, TContext contextProvider)
+      : retryPolicy(std::move(retryPolicy))
+      , contextProvider(std::move(contextProvider))
+    {}
+
     TRetry retryPolicy;
     TContext contextProvider;
   };
+  template<RetryPolicyConcept TRetry, ClientContextProviderConcept TContext>
+  RetryOptions(TRetry, TContext) -> RetryOptions<TRetry, TContext>;
+
   using DefaultRetryOptions = RetryOptions<DefaultRetryPolicy, DefaultClientContextProvider>;
   static_assert(RetryOptionsConcept<DefaultRetryOptions>);
 
@@ -393,7 +404,7 @@ namespace async_grpc {
     ChannelProvider m_channelProvider;
 
     typename Service::Stub MakeStub() {
-      return Service::Stub(m_channelProvider.SelectNextChannel());
+      return typename Service::Stub(m_channelProvider.SelectNextChannel());
     }
   };
 }

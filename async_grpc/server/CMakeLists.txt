@@ -9,6 +9,9 @@ target_link_libraries(server
   PRIVATE async_grpc protos
 )
 target_include_directories(server
-  PRIVATE "$<TARGET_PROPERTY:async_grpc,SOURCE_DIR>/.." "$<TARGET_PROPERTY:protos,BINARY_DIR>/.."
+  PRIVATE "$<TARGET_PROPERTY:async_grpc,SOURCE_DIR>/.."
+)
+target_include_directories(server
+  SYSTEM PRIVATE "$<TARGET_PROPERTY:protos,BINARY_DIR>/.."
 )
 setup_target_compile_options(server)

@@ -1,4 +1,5 @@
 #include <iostream>
+#include <iomanip>
 #include <async_grpc/client.hpp>
 #include <protos/echo_service.grpc.pb.h>
 #include <protos/variable_service.grpc.pb.h>
@@ -42,7 +43,9 @@ public:
 
 private:
   std::ostream& Log() {
-    return std::cout << '<' << std::chrono::system_clock::now() << "> ";
+    auto now = std::chrono::system_clock::now();
+    auto time = std::chrono::system_clock::to_time_t(now);
+    return std::cout << '<' << std::put_time(std::localtime(&time), "%F %T.") << std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000 << "> ";
   }
 
   async_grpc::Coroutine Noop() {
@@ -95,14 +98,14 @@ private:
     grpc::Status status;
     std::unique_ptr<grpc::ClientContext> context;
 
-    auto retryOptions = async_grpc::RetryOptions{
-      .retryPolicy = [this, policy = async_grpc::DefaultRetryPolicy()](const grpc::Status& status) mutable {
+    auto retryOptions = async_grpc::RetryOptions(
+      [this, policy = async_grpc::DefaultRetryPolicy()](const grpc::Status& status) mutable {
         auto sent = policy(status);
         Log() << "got " << status << (sent ? " will " : " will not ") << "retry" << std::endl;
         return sent;
       },
-      .contextProvider = async_grpc::DefaultClientContextProvider{}
-    };
+      async_grpc::DefaultClientContextProvider{}
+    );
 
     if (co_await m_echo.AutoRetryUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, UnaryEcho), context, request, response, status, retryOptions)) {
       std::ostream& out = Log() << status;
