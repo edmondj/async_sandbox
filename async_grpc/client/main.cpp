@@ -94,7 +94,17 @@ private:
     echo_service::UnaryEchoResponse response;
     grpc::Status status;
     std::unique_ptr<grpc::ClientContext> context;
-    if (co_await m_echo.AutoRetryUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, UnaryEcho), context, request, response, status)) {
+
+    auto retryOptions = async_grpc::RetryOptions{
+      .retryPolicy = [this, policy = async_grpc::DefaultRetryPolicy()](const grpc::Status& status) mutable {
+        auto sent = policy(status);
+        Log() << "got " << status << (sent ? " will " : " will not ") << "retry" << std::endl;
+        return sent;
+      },
+      .contextProvider = async_grpc::DefaultClientContextProvider{}
+    };
+
+    if (co_await m_echo.AutoRetryUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, UnaryEcho), context, request, response, status, retryOptions)) {
       std::ostream& out = Log() << status;
       if (status.ok()) {
         out << ' ' << response.message();
