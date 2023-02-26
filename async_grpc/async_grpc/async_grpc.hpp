@@ -213,6 +213,14 @@ namespace async_grpc {
     Coroutine::promise_type* m_promise = nullptr;
   };
 
+  template<typename T>
+  constexpr bool IsAwaitable = false;
+  template<typename T>
+  constexpr bool IsAwaitable<Awaitable<T>> = true;
+
+  template<typename T>
+  concept IsAwaitableConcept = IsAwaitable<T> || IsAwaitable<decltype(std::declval<T>().operator co_await())>;
+
   bool CompletionQueueTick(grpc::CompletionQueue* cq);
   void CompletionQueueShutdown(grpc::CompletionQueue* cq);
 
@@ -245,6 +253,9 @@ namespace async_grpc {
     Alarm(TDeadline deadline)
       : m_deadline(std::move(deadline))
     {}
+
+    Alarm(Alarm&&) = default;
+    Alarm& operator=(Alarm&&) = default;
 
     auto Start() {
       return Awaitable([&](grpc::CompletionQueue* cq, void* tag) {

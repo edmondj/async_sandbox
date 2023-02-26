@@ -39,12 +39,12 @@ namespace async_grpc {
   template<typename T>
   concept RetryPolicyConcept = requires(T t, const grpc::Status& status) {
     { static_cast<bool>(t(status)) };
-    { *t(status) } -> TimePointConcept;
+    { *t(status) } -> IsAwaitableConcept;
   };
 
   class DefaultRetryPolicy {
   public:
-    std::optional<std::chrono::system_clock::time_point> operator()(const grpc::Status& status);
+    std::optional<Alarm<std::chrono::system_clock::time_point>> operator()(const grpc::Status& status);
 
   private:
     size_t m_retryCount = 0;
@@ -367,7 +367,7 @@ namespace async_grpc {
           break;
         }
         if (auto shouldRetry = retryOptions.retryPolicy(status); shouldRetry) {
-          co_await Alarm(*shouldRetry);
+          co_await *shouldRetry;
         } else {
           break;
         }

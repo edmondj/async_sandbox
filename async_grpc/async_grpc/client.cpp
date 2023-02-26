@@ -34,12 +34,12 @@ namespace async_grpc {
       return m_channels[++m_nextChannel % m_channels.size()];
   }
 
-  std::optional<std::chrono::system_clock::time_point> DefaultRetryPolicy::operator()(const grpc::Status& status)
+  std::optional<Alarm<std::chrono::system_clock::time_point>> DefaultRetryPolicy::operator()(const grpc::Status& status)
   {
     static const uint32_t delays_s[] = { 1, 2, 3, 5, 8 };
 
     if (m_retryCount < std::size(delays_s) && status.error_code() == grpc::StatusCode::UNAVAILABLE) {
-      return std::chrono::system_clock::now() + std::chrono::seconds(delays_s[m_retryCount++]);
+      return Alarm(std::chrono::system_clock::now() + std::chrono::seconds(delays_s[m_retryCount++]));
     }
     return std::nullopt;
   }
