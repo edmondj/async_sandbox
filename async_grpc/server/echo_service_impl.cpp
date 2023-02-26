@@ -21,7 +21,7 @@ static async_grpc::ServerServerStreamCoroutine ServerStreamEchoImpl(std::unique_
   echo_service::ServerStreamEchoResponse response;
   response.set_message(std::move(*context->request.mutable_message()));
   for (uint32_t n = 1; n <= context->request.count(); ++n) {
-    co_await async_grpc::Alarm(context->executor, std::chrono::system_clock::now() + std::chrono::milliseconds(context->request.delay_ms()));
+    co_await async_grpc::Alarm(std::chrono::system_clock::now() + std::chrono::milliseconds(context->request.delay_ms()));
     response.set_n(n);
     co_await context->Write(response);
   }
@@ -32,13 +32,13 @@ static async_grpc::ServerBidirectionalStreamCoroutine BidirectionalStreamEchoImp
   echo_service::BidirectionalStreamEchoRequest request;
   echo_service::BidirectionalStreamEchoResponse response;
   async_grpc::Alarm<std::chrono::system_clock::time_point> alarm;
+  async_grpc::Coroutine::Subroutine subroutine;
   uint32_t delay_ms = 0;
-  bool running = false;
 
   while (co_await context->Read(request)) {
     switch (request.command_case()) {
     case echo_service::BidirectionalStreamEchoRequest::CommandCase::kMessage: {
-      if (running) {
+      if (subroutine) {
         co_await context->Finish(grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Can not change message while running"));
         co_return;
       }
@@ -47,7 +47,7 @@ static async_grpc::ServerBidirectionalStreamCoroutine BidirectionalStreamEchoImp
       break;
     }
     case echo_service::BidirectionalStreamEchoRequest::CommandCase::kStart: {
-      if (running) {
+      if (subroutine) {
         co_await context->Finish(grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Can not start when already started"));
         co_return;
       }
@@ -55,9 +55,9 @@ static async_grpc::ServerBidirectionalStreamCoroutine BidirectionalStreamEchoImp
         co_await context->Finish(grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Can not start with invalid message set"));
         co_return;
       }
-      async_grpc::Coroutine::Spawn([&]() -> async_grpc::Coroutine {
+      subroutine = co_await async_grpc::Coroutine::StartSubroutine([&]() -> async_grpc::Coroutine {
         while (true) {
-          alarm = async_grpc::Alarm(context->executor, std::chrono::system_clock::now() + std::chrono::milliseconds(delay_ms));
+          alarm = async_grpc::Alarm(std::chrono::system_clock::now() + std::chrono::milliseconds(delay_ms));
           if (!co_await alarm) {
             break;
           }
@@ -66,30 +66,37 @@ static async_grpc::ServerBidirectionalStreamCoroutine BidirectionalStreamEchoImp
           }
         }
       }());
-      running = true;
       break;
     }
     case echo_service::BidirectionalStreamEchoRequest::CommandCase::kStop: {
-      if (!running) {
+      if (!subroutine) {
         co_await context->Finish(grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Can not stop when not running"));
         co_return;
       }
-      running = false;
       alarm.Cancel();
+      co_await subroutine;
       break;
     }
     default:
+      if (subroutine) {
+        alarm.Cancel();
+        co_await subroutine;
+      }
       co_await context->Finish(grpc::Status(grpc::StatusCode::INTERNAL, "Unhandled command case"));
       co_return;
     }
+  }
+  if (subroutine) {
+    alarm.Cancel();
+    co_await subroutine;
   }
   co_await context->Finish();
 }
 
 void EchoServiceImpl::StartListening(async_grpc::Server& server)
 {
-  async_grpc::Coroutine::Spawn(server.StartListeningUnary(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, UnaryEcho), &UnaryEchoImpl));
-  async_grpc::Coroutine::Spawn(server.StartListeningClientStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, ClientStreamEcho), &ClientStreamEchoImpl));
-  async_grpc::Coroutine::Spawn(server.StartListeningServerStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, ServerStreamEcho), &ServerStreamEchoImpl));
-  async_grpc::Coroutine::Spawn(server.StartListeningBidirectionalStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, BidirectionalStreamEcho), &BidirectionalStreamEchoImpl));
+  server.Spawn(server.StartListeningUnary(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, UnaryEcho), &UnaryEchoImpl));
+  server.Spawn(server.StartListeningClientStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, ClientStreamEcho), &ClientStreamEchoImpl));
+  server.Spawn(server.StartListeningServerStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, ServerStreamEcho), &ServerStreamEchoImpl));
+  server.Spawn(server.StartListeningBidirectionalStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, BidirectionalStreamEcho), &BidirectionalStreamEchoImpl));
 }

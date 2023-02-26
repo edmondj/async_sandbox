@@ -28,9 +28,9 @@ endfunction()
 
 function(setup_target_compile_options t)
 	if (MSVC)
-		target_compile_options(${t} INTERFACE "/WX")
+		target_compile_options(${t} PRIVATE "/W3" "/WX")
 	elseif (CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)")
-		target_compile_options(${t} INTERFACE "-Wextra" "-Werror")
+		target_compile_options(${t} PRIVATE "-Wextra" "-Wall" "-Werror")
 	endif ()
 endfunction()
 

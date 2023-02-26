@@ -11,6 +11,13 @@ namespace async_grpc {
 
   const char* StatusCodeString(grpc::StatusCode code);
 
+  class Coroutine;
+
+  template<typename T>
+  concept ExecutorConcept = std::move_constructible<T> && requires(const T executor, Coroutine&& coro) {
+    { executor.GetCq() } -> std::same_as<grpc::CompletionQueue*>;
+  };
+
   template<typename T>
   concept ServiceConcept = std::derived_from<typename T::AsyncService, grpc::Service>&& requires {
     typename T::Stub;
@@ -19,41 +26,154 @@ namespace async_grpc {
   // Must be either co_await'ed or given to Spawn
   class [[nodiscard]] Coroutine {
   public:
+    enum class ResumeResult {
+      Suspended,
+      Cancelled,
+      Done
+    };
+
     struct promise_type {
       inline Coroutine get_return_object() { return {*this}; }
-      inline std::suspend_never initial_suspend() noexcept { return {}; };
+      inline std::suspend_always initial_suspend() noexcept { return {}; };
       inline std::suspend_always final_suspend() noexcept {
-        std::visit([&]<typename T>(T& next) {
-          if (next) {
-            if constexpr (std::is_same_v<T, std::coroutine_handle<promise_type>>) {
-              next.promise().cancelled = cancelled;
-            }
-            next.resume();
-          }
-        }, next);
+        if (parent) {
+          parent.promise().cancelled = cancelled;
+        }
         return {};
       };
       void return_void() {}
       void unhandled_exception() {}
 
+      grpc::CompletionQueue* completionQueue = nullptr;
       bool cancelled = false;
-      std::variant<std::coroutine_handle<promise_type>, std::coroutine_handle<>> next;
+      std::coroutine_handle<promise_type> parent;
+      ResumeResult* resumeStorage = nullptr;
     };
 
     inline bool await_ready() { return false; }
-    inline void await_suspend(std::coroutine_handle<Coroutine::promise_type> next) {
-      m_promise.next = next;
+    inline bool await_suspend(std::coroutine_handle<promise_type> parent) {
+      m_promise.completionQueue = parent.promise().completionQueue;
+      auto cur = std::coroutine_handle<promise_type>::from_promise(m_promise);
+      ResumeResult res = Coroutine::Resume(cur);
+      if (res != ResumeResult::Suspended) {
+        parent.promise().cancelled = res == ResumeResult::Cancelled;
+        return false;
+      }
+      m_promise.parent = parent;
+      return true;
     }
-    inline bool await_resume() { return !m_promise.cancelled; }
+    inline bool await_resume() {
+      return !m_promise.cancelled;
+    }
 
-    inline static void Spawn(Coroutine&& c) {
-      auto h = std::coroutine_handle<promise_type>::from_promise(c.m_promise);
+    static ResumeResult GetResult(std::coroutine_handle<promise_type> h) {
       if (h.done()) {
+        if (h.promise().cancelled) {
+          return ResumeResult::Cancelled;
+        }
+        return ResumeResult::Done;
+      }
+      return ResumeResult::Suspended;
+    }
+
+    static ResumeResult Resume(std::coroutine_handle<promise_type> h) {
+      h.resume();
+      ResumeResult res = GetResult(h);
+      if (h.promise().resumeStorage) {
+        *h.promise().resumeStorage = res;
+      }
+      if (res != ResumeResult::Suspended) {
+        std::coroutine_handle<promise_type> parent = h.promise().parent;
+        bool cancelled = h.promise().cancelled;
+        if (parent) {
+          parent.promise().cancelled = cancelled;
+          Resume(parent);
+        }
         h.destroy();
       }
+      return res;
     }
 
+    template<ExecutorConcept TExecutor>
+    static void Spawn(TExecutor& executor, Coroutine&& coroutine) {
+      coroutine.m_promise.completionQueue = executor.GetCq();
+      auto h = std::coroutine_handle<promise_type>::from_promise(coroutine.m_promise);
+      Resume(h);
+    }
+
+    struct [[nodiscard]] Subroutine {
+    public:
+      Subroutine() = default;
+      Subroutine(promise_type& promise)
+        : m_promise(&promise)
+        , m_resume(GetResult(std::coroutine_handle<promise_type>::from_promise(promise)))
+      {
+        m_promise->resumeStorage = &m_resume;
+      }
+      Subroutine(Subroutine&& other) noexcept
+        : m_promise(std::exchange(other.m_promise, nullptr))
+        , m_resume(other.m_resume)
+      {
+        if (m_promise) {
+          m_promise->resumeStorage = &m_resume;
+        }
+      }
+      Subroutine& operator=(Subroutine&& other) noexcept
+      {
+        std::swap(m_promise, other.m_promise);
+        if (m_promise) {
+          m_promise->resumeStorage = &m_resume;
+        }
+        if (other.m_promise) {
+          other.m_promise->resumeStorage = &other.m_resume;
+        }
+        return *this;
+      }
+      ~Subroutine() {
+        assert(!m_promise);
+      }
+
+      explicit operator bool() const { return m_promise; }
+
+      bool await_ready() { return m_resume != ResumeResult::Suspended; }
+      void await_suspend(std::coroutine_handle<promise_type> parent) {
+        m_promise->parent = parent;
+      }
+      inline bool await_resume() {
+        m_promise = nullptr;
+        return m_resume == ResumeResult::Done;
+      }
+
+    private:
+      promise_type* m_promise = nullptr;
+      ResumeResult m_resume = ResumeResult::Done;
+    };
+
+    // Start a subroutine on the same executor as the current coroutine
+    // Needs to be immediately co_await'ed
+    // The subroutine will run start running immediatly
+    struct [[nodiscard]] StartSubroutine {
+      StartSubroutine(Coroutine&& coro)
+        : m_promise(coro.m_promise)
+      {}
+
+      bool await_ready() { return false; }
+      bool await_suspend(std::coroutine_handle<promise_type> cur) {
+        m_promise.completionQueue = cur.promise().completionQueue;
+        Coroutine::Resume(std::coroutine_handle<promise_type>::from_promise(m_promise));
+        return false;
+      }
+
+      Subroutine await_resume() {
+        return Subroutine(m_promise);
+      }
+
+    private:
+      promise_type& m_promise;
+    };
+
   private:
+
     inline Coroutine(promise_type& promise)
       : m_promise(promise)
     {}
@@ -68,7 +188,7 @@ namespace async_grpc {
   };
 
   // TFunc must be calling an action queuing the provided tag to a completion queue managed by CompletionQueueThread
-  template<std::invocable<void*> TFunc>
+  template<std::invocable<grpc::CompletionQueue*, void*> TFunc>
   class [[nodiscard]] Awaitable {
   public:
     Awaitable(TFunc func)
@@ -81,7 +201,7 @@ namespace async_grpc {
 
     void await_suspend(std::coroutine_handle<Coroutine::promise_type> h) {
       m_promise = &h.promise();
-      m_func(h.address());
+      m_func(m_promise->completionQueue, h.address());
     }
 
     bool await_resume() {
@@ -91,11 +211,6 @@ namespace async_grpc {
   private:
     TFunc m_func;
     Coroutine::promise_type* m_promise = nullptr;
-  };
-
-  template<typename T>
-  concept ExecutorConcept = std::move_constructible<T> && requires(const T executor) {
-    { executor.GetCq() } -> std::same_as<grpc::CompletionQueue*>;
   };
 
   bool CompletionQueueTick(grpc::CompletionQueue* cq);
@@ -127,15 +242,13 @@ namespace async_grpc {
   public:
     Alarm() = default;
 
-    template<ExecutorConcept TExecutor>
-    Alarm(const TExecutor& executor, TDeadline deadline)
-      : m_cq(executor.GetCq())
-      , m_deadline(std::move(deadline))
+    Alarm(TDeadline deadline)
+      : m_deadline(std::move(deadline))
     {}
 
     auto Start() {
-      return Awaitable([&](void* tag) {
-        m_alarm.Set(m_cq, m_deadline, tag);
+      return Awaitable([&](grpc::CompletionQueue* cq, void* tag) {
+        m_alarm.Set(cq, m_deadline, tag);
       });
     }
 
@@ -146,7 +259,6 @@ namespace async_grpc {
     auto operator co_await() { return Start(); }
 
   private:
-    grpc::CompletionQueue* m_cq = nullptr;
     TDeadline m_deadline;
     grpc::Alarm m_alarm;
   };
@@ -171,8 +283,12 @@ namespace async_grpc {
       CompletionQueueShutdown(m_executor.GetCq());
     }
 
-    const TExecutor& GetExecutor() {
+    TExecutor& GetExecutor() {
       return m_executor;
+    }
+
+    void Spawn(Coroutine&& coroutine) {
+      Coroutine::Spawn(m_executor, std::move(coroutine));
     }
 
   private:

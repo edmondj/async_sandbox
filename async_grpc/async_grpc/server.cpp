@@ -14,7 +14,7 @@ namespace async_grpc {
     return m_cq.get();
   }
 
-  ServerContext::ServerContext(const ServerExecutor& executor)
+  ServerContext::ServerContext(ServerExecutor& executor)
     : executor(executor)
   {}
 
@@ -48,7 +48,12 @@ namespace async_grpc {
     m_server->Shutdown();
   }
 
-  const ServerExecutor& Server::SelectNextExecutor()
+  void Server::Spawn(ServerListenCoroutine&& coroutine)
+  {
+    ServerListenCoroutine::Spawn(SelectNextExecutor(), std::move(coroutine));
+  }
+
+  ServerExecutor& Server::SelectNextExecutor()
   {
     // Round Robin on all executors, more algorithms possible
     return m_executors[m_nextExecutor++ % m_executors.size()].GetExecutor();

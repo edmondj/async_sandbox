@@ -21,6 +21,8 @@ public:
     , m_variable(channel)
   {
 #define ADD_HANDLER(command) m_handlers.insert_or_assign(#command, &Program::command)
+    ADD_HANDLER(Noop);
+    ADD_HANDLER(NestedEcho);
     ADD_HANDLER(UnaryEcho);
     ADD_HANDLER(ClientStreamEcho);
     ADD_HANDLER(ServerStreamEcho);
@@ -31,7 +33,7 @@ public:
   void Process(std::string_view line) {
     for (const auto& [name, handler] : m_handlers) {
       if (line.starts_with(name)) {
-        async_grpc::Coroutine::Spawn((this->*handler)());
+        m_executor.Spawn((this->*handler)());
         return;
       }
     }
@@ -43,6 +45,47 @@ private:
     return std::cout << '<' << std::chrono::system_clock::now() << "> ";
   }
 
+  async_grpc::Coroutine Noop() {
+    Log() << "start" << std::endl;
+    co_await[this]() -> async_grpc::Coroutine {
+      Log() << "start sub1" << std::endl;
+      co_await[this]() -> async_grpc::Coroutine {
+        Log() << "sub2" << std::endl;
+        co_return;
+      }();
+      Log() << "end sub1" << std::endl;
+    }();
+    Log() << "end" << std::endl;
+  }
+
+  async_grpc::Coroutine NestedEcho() {
+    Log() << "start" << std::endl;
+    co_await[this]() -> async_grpc::Coroutine {
+      Log() << "start sub1" << std::endl;
+      co_await[this]() -> async_grpc::Coroutine {
+        Log() << "start sub2" << std::endl;
+        echo_service::UnaryEchoRequest request;
+        request.set_message("hello");
+        echo_service::UnaryEchoResponse response;
+        grpc::Status status;
+        grpc::ClientContext context;
+        if (co_await m_echo.CallUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, UnaryEcho), context, request, response, status)) {
+          std::ostream& out = Log() << status;
+          if (status.ok()) {
+            out << ' ' << response.message();
+          }
+          out << std::endl;
+        }
+        else {
+          Log() << "cancelled" << std::endl;
+        }
+        Log() << "end sub2" << std::endl;
+      }();
+      Log() << "end sub1" << std::endl;
+    }();
+    Log() << "end" << std::endl;
+  }
+
   async_grpc::Coroutine UnaryEcho() {
     Log() << "start" << std::endl;
     echo_service::UnaryEchoRequest request;
@@ -51,7 +94,7 @@ private:
     echo_service::UnaryEchoResponse response;
     grpc::Status status;
     std::unique_ptr<grpc::ClientContext> context;
-    if (co_await m_echo.AutoRetryUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, UnaryEcho), m_executor.GetExecutor(), context, request, response, status)) {
+    if (co_await m_echo.AutoRetryUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, UnaryEcho), context, request, response, status)) {
       std::ostream& out = Log() << status;
       if (status.ok()) {
         out << ' ' << response.message();
@@ -138,13 +181,13 @@ private:
       Log() << "start cancelled" << std::endl;
       co_return;
     }
-    auto readCoroutine = [&]() -> async_grpc::Coroutine {
+    async_grpc::Coroutine::Subroutine readCoroutine = co_await async_grpc::Coroutine::StartSubroutine([&]() -> async_grpc::Coroutine {
       echo_service::BidirectionalStreamEchoResponse response;
       while (co_await call->Read(response)) {
         Log() << response.message() << std::endl;
       }
       Log() << "read done" << std::endl;
-    }();
+    }());
     echo_service::BidirectionalStreamEchoRequest request;
     auto* message = request.mutable_message();
     message->set_message("guten tag");
@@ -161,7 +204,7 @@ private:
       co_return;
     }
     Log() << "wait" << std::endl;
-    if (!co_await async_grpc::Alarm(m_executor.GetExecutor(), std::chrono::system_clock::now() + std::chrono::milliseconds(3500))) {
+    if (!co_await async_grpc::Alarm(std::chrono::system_clock::now() + std::chrono::milliseconds(3500))) {
       Log() << "wait cancelled" << std::endl;
       co_return;
     }
@@ -176,6 +219,7 @@ private:
       co_return;
     }
     Log() << "wait read" << std::endl;
+    context.TryCancel(); // Cancel pending read
     co_await readCoroutine;
     Log() << "end" << std::endl;
   }

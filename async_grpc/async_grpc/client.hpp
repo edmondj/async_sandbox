@@ -80,16 +80,15 @@ namespace async_grpc {
   using TPrepareUnaryFunc = std::unique_ptr<grpc::ClientAsyncResponseReader<TResponse>> (TStub::*)(grpc::ClientContext*, const TRequest&, grpc::CompletionQueue*);
  
   template<typename TResponse>
-  class [[nodiscard]] ClientUnaryCall : public ClientCall {
+  class [[nodiscard]] ClientUnaryCall {
   public:
 
-    ClientUnaryCall(const ClientExecutor& executor, std::unique_ptr<grpc::ClientAsyncResponseReader<TResponse>> reader)
-      : ClientCall(executor)
-      , m_reader(std::move(reader))
+    ClientUnaryCall(std::unique_ptr<grpc::ClientAsyncResponseReader<TResponse>> reader)
+      : m_reader(std::move(reader))
     {}
 
     auto Finish(TResponse& response, grpc::Status& status) {
-      return Awaitable([&](void* tag) {
+      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
         m_reader->Finish(&response, &status, tag);
       });
     }
@@ -98,23 +97,31 @@ namespace async_grpc {
     std::unique_ptr<grpc::ClientAsyncResponseReader<TResponse>> m_reader;
   };
 
-  template<typename TResponse>
+  template<typename TStub, typename TRequest, typename TResponse>
   class [[nodiscard]] ClientUnaryAwaitable {
   public:
-    ClientUnaryAwaitable(const ClientExecutor& executor, std::unique_ptr<grpc::ClientAsyncResponseReader<TResponse>> reader)
-      : m_executor(executor)
-      , m_reader(std::move(reader))
+    ClientUnaryAwaitable(TStub stub, TPrepareUnaryFunc<TStub, TRequest, TResponse> func, grpc::ClientContext& context, const TRequest& request)
+      : m_stub(std::move(stub))
+      , m_func(func)
+      , m_context(context)
+      , m_request(request)
     {}
 
-    bool await_ready() { return true; }
-    void await_suspend(std::coroutine_handle<Coroutine::promise_type>) {}
+    bool await_ready() { return false; }
+    bool await_suspend(std::coroutine_handle<Coroutine::promise_type> h) {
+      m_reader = (m_stub.*m_func)(&m_context, m_request, h.promise().completionQueue);
+      return false;
+    }
     ClientUnaryCall<TResponse> await_resume() {
       m_reader->StartCall();
-      return ClientUnaryCall<TResponse>(m_executor, std::move(m_reader));
+      return ClientUnaryCall<TResponse>(std::move(m_reader));
     }
 
   private:
-    const ClientExecutor& m_executor;
+    TStub m_stub;
+    TPrepareUnaryFunc<TStub, TRequest, TResponse> m_func;
+    grpc::ClientContext& m_context;
+    const TRequest& m_request;
     std::unique_ptr<grpc::ClientAsyncResponseReader<TResponse>> m_reader;
   };
 
@@ -134,25 +141,25 @@ namespace async_grpc {
     {}
 
     auto Write(const TRequest& msg) {
-      return Awaitable([&](void* tag) {
+      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
         m_writer->Write(msg, tag);
       });
     }
 
     auto Write(const TRequest& msg, grpc::WriteOptions options) {
-      return Awaitable([&](void* tag) {
+      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
         m_writer->Write(msg, options, tag);
       });
     }
 
     auto WritesDone() {
-      return Awaitable([&](void* tag) {
+      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
         m_writer->WritesDone(tag);
       });
     }
 
     auto Finish(grpc::Status& status) {
-      return Awaitable([&](void* tag) {
+      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
         m_writer->Finish(&status, tag);
       });
     }
@@ -204,13 +211,13 @@ namespace async_grpc {
     {}
 
     auto Read(TResponse& response) {
-      return Awaitable([&](void* tag) {
+      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
         m_reader->Read(&response, tag);
       });
     }
 
     auto Finish(grpc::Status& status) {
-      return Awaitable([&](void* tag) {
+      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
         m_reader->Finish(&status, tag);
       });
     }
@@ -264,31 +271,31 @@ namespace async_grpc {
     {}
 
     auto Read(TResponse& response) {
-      return Awaitable([&](void* tag) {
+      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
         m_readerWriter->Read(&response, tag);
       });
     }
 
     auto Write(const TRequest& msg) {
-      return Awaitable([&](void* tag) {
+      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
         m_readerWriter->Write(msg, tag);
       });
     }
 
     auto Write(const TRequest& msg, grpc::WriteOptions options) {
-      return Awaitable([&](void* tag) {
+      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
         m_readerWriter->Write(msg, options, tag);
       });
     }
 
     auto WritesDone() {
-      return Awaitable([&](void* tag) {
+      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
         m_readerWriter->WritesDone(tag);
       });
     }
 
     auto Finish(grpc::Status& status) {
-      return Awaitable([&](void* tag) {
+      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
         m_readerWriter->Finish(&status, tag);
       });
     }
@@ -339,28 +346,28 @@ namespace async_grpc {
     {}
 
     template<typename TRequest, typename TResponse>
-    auto CallUnary(TPrepareUnaryFunc<typename Service::Stub, TRequest, TResponse> func, const ClientExecutor& executor, grpc::ClientContext& context, const TRequest& request) {
-      return ClientUnaryAwaitable(executor, (MakeStub().*func)(&context, request, executor.GetCq()));
+    auto CallUnary(TPrepareUnaryFunc<typename Service::Stub, TRequest, TResponse> func, grpc::ClientContext& context, const TRequest& request) {
+      return ClientUnaryAwaitable<typename Service::Stub, TRequest, TResponse>(MakeStub(), func, context, request);
     }
 
     template<typename TRequest, typename TResponse>
-    Coroutine CallUnary(TPrepareUnaryFunc<typename Service::Stub, TRequest, TResponse> func, const ClientExecutor& executor, grpc::ClientContext& context, const TRequest& request, TResponse& response, grpc::Status& status) {
-      auto call = co_await CallUnary(func, executor, context, request);
+    Coroutine CallUnary(TPrepareUnaryFunc<typename Service::Stub, TRequest, TResponse> func, grpc::ClientContext& context, const TRequest& request, TResponse& response, grpc::Status& status) {
+      auto call = co_await CallUnary(func, context, request);
       co_await call.Finish(response, status);
     }
 
     template<typename TRequest, typename TResponse, RetryOptionsConcept TRetryOptions = DefaultRetryOptions>
-    Coroutine AutoRetryUnary(TPrepareUnaryFunc<typename Service::Stub, TRequest, TResponse> func, const ClientExecutor& executor, std::unique_ptr<grpc::ClientContext>& context, const TRequest& request, TResponse& response, grpc::Status& status, TRetryOptions retryOptions = {}) {
+    Coroutine AutoRetryUnary(TPrepareUnaryFunc<typename Service::Stub, TRequest, TResponse> func, std::unique_ptr<grpc::ClientContext>& context, const TRequest& request, TResponse& response, grpc::Status& status, TRetryOptions retryOptions = {}) {
       while (true) {
         context = retryOptions.contextProvider();
-        if (!co_await CallUnary(func, executor, *context, request, response, status)) {
+        if (!co_await CallUnary(func, *context, request, response, status)) {
           break;
         }
         if (status.ok()) {
           break;
         }
         if (auto shouldRetry = retryOptions.retryPolicy(status); shouldRetry) {
-          co_await Alarm(executor, *shouldRetry);
+          co_await Alarm(*shouldRetry);
         } else {
           break;
         }
