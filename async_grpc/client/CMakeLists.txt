@@ -11,3 +11,7 @@ target_include_directories(client
   SYSTEM PRIVATE "$<TARGET_PROPERTY:protos,BINARY_DIR>/.."
 )
 setup_target_compile_options(client)
+
+if (MSVC)
+  target_compile_definitions(client PRIVATE "_CRT_SECURE_NO_WARNINGS")
+endif ()

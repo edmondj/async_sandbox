@@ -14,4 +14,5 @@ target_include_directories(server
 target_include_directories(server
   SYSTEM PRIVATE "$<TARGET_PROPERTY:protos,BINARY_DIR>/.."
 )
+
 setup_target_compile_options(server)

@@ -194,7 +194,7 @@ private:
       Log() << "start cancelled" << std::endl;
       co_return;
     }
-    async_grpc::Coroutine::Subroutine readCoroutine = co_await async_grpc::Coroutine::StartSubroutine([&]() -> async_grpc::Coroutine {
+    async_grpc::Coroutine readCoroutine = co_await async_grpc::Coroutine::StartSubroutine([&]() -> async_grpc::Coroutine {
       echo_service::BidirectionalStreamEchoResponse response;
       while (co_await call->Read(response)) {
         Log() << response.message() << std::endl;
@@ -233,7 +233,7 @@ private:
     }
     Log() << "wait read" << std::endl;
     context.TryCancel(); // Cancel pending read
-    co_await readCoroutine;
+    co_await std::move(readCoroutine);
     Log() << "end" << std::endl;
   }
 

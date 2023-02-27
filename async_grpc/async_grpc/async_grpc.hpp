@@ -26,165 +26,167 @@ namespace async_grpc {
   // Must be either co_await'ed or given to Spawn
   class [[nodiscard]] Coroutine {
   public:
-    enum class ResumeResult {
+    enum class Status {
+      Unstarted,
       Suspended,
       Cancelled,
       Done
     };
 
     struct promise_type {
-      inline Coroutine get_return_object() { return {*this}; }
+      inline Coroutine get_return_object() { return Coroutine(this); }
       inline std::suspend_always initial_suspend() noexcept { return {}; };
-      inline std::suspend_always final_suspend() noexcept {
-        if (parent) {
-          parent.promise().cancelled = cancelled;
-        }
-        return {};
-      };
+      inline std::suspend_always final_suspend() noexcept { return {}; };
       void return_void() {}
       void unhandled_exception() {}
 
       grpc::CompletionQueue* completionQueue = nullptr;
-      bool cancelled = false;
       std::coroutine_handle<promise_type> parent;
-      ResumeResult* resumeStorage = nullptr;
+      bool cancelled = false;
+      Status* statusStorage = nullptr;
+
+      Coroutine await_transform(Coroutine&& child) {
+        child.m_promise->completionQueue = completionQueue;
+        if (child.m_status == Status::Unstarted) {
+          Resume(std::coroutine_handle<promise_type>::from_promise(*child.m_promise));
+        }
+        if (child.m_status == Status::Suspended) {
+          child.m_promise->parent = std::coroutine_handle<promise_type>::from_promise(*this);
+        }
+        else {
+          child.m_promise = nullptr;
+        }
+        return std::move(child);
+      }
+
+      void await_transform(Coroutine&) = delete;
+      void await_transform(const Coroutine&) = delete;
+      void await_transform(const Coroutine&&) = delete;
+
+      template<typename TAwaitable>
+      decltype(auto) await_transform(TAwaitable&& t) {
+        return std::forward<TAwaitable>(t);
+      }
     };
 
-    inline bool await_ready() { return false; }
-    inline bool await_suspend(std::coroutine_handle<promise_type> parent) {
-      m_promise.completionQueue = parent.promise().completionQueue;
-      auto cur = std::coroutine_handle<promise_type>::from_promise(m_promise);
-      ResumeResult res = Coroutine::Resume(cur);
-      if (res != ResumeResult::Suspended) {
-        parent.promise().cancelled = res == ResumeResult::Cancelled;
-        return false;
-      }
-      m_promise.parent = parent;
-      return true;
-    }
-    inline bool await_resume() {
-      return !m_promise.cancelled;
+    // Ctor only used from promise_type::get_return_object
+    inline explicit Coroutine(promise_type* promise)
+      : m_promise(promise)
+    {
+      m_promise->statusStorage = &m_status;
     }
 
-    static ResumeResult GetResult(std::coroutine_handle<promise_type> h) {
+    Coroutine() = default;
+    Coroutine(Coroutine&& other) noexcept
+      : m_promise(std::exchange(other.m_promise, nullptr))
+      , m_status(std::exchange(other.m_status, Status::Unstarted))
+    {
+      if (m_promise) {
+        m_promise->statusStorage = &m_status;
+      }
+    }
+
+    Coroutine& operator=(Coroutine&& other) noexcept {
+      assert(!m_promise);
+      assert(m_status != Status::Suspended);
+
+      m_promise = std::exchange(other.m_promise, nullptr);
+      m_status = std::exchange(other.m_status, Status::Unstarted);
+      if (m_promise) {
+        m_promise->statusStorage = &m_status;
+      }
+      return *this;
+    }
+
+    ~Coroutine() {
+      assert(!m_promise);
+    }
+
+    explicit operator bool() const { return m_promise; }
+
+    inline bool await_ready() { return m_status != Status::Suspended; }
+    inline void await_suspend(std::coroutine_handle<promise_type> parent) {
+      assert(m_promise);
+      m_promise->parent = parent;
+      m_promise = nullptr;
+    }
+    inline bool await_resume() { return m_status == Status::Done; }
+
+    static Status GetStatus(std::coroutine_handle<promise_type> h) {
+      assert(h);
       if (h.done()) {
         if (h.promise().cancelled) {
-          return ResumeResult::Cancelled;
+          return Status::Cancelled;
         }
-        return ResumeResult::Done;
+        return Status::Done;
       }
-      return ResumeResult::Suspended;
+      return Status::Suspended;
     }
 
-    static ResumeResult Resume(std::coroutine_handle<promise_type> h) {
+    static void Resume(std::coroutine_handle<promise_type> h) {
       h.resume();
-      ResumeResult res = GetResult(h);
-      if (h.promise().resumeStorage) {
-        *h.promise().resumeStorage = res;
+      Status res = GetStatus(h);
+      if (h.promise().statusStorage) {
+        *h.promise().statusStorage = res;
       }
-      if (res != ResumeResult::Suspended) {
+      if (res != Status::Suspended) {
         std::coroutine_handle<promise_type> parent = h.promise().parent;
         bool cancelled = h.promise().cancelled;
+        h.destroy();
         if (parent) {
           parent.promise().cancelled = cancelled;
           Resume(parent);
         }
-        h.destroy();
       }
-      return res;
     }
 
     template<ExecutorConcept TExecutor>
     static void Spawn(TExecutor& executor, Coroutine&& coroutine) {
-      coroutine.m_promise.completionQueue = executor.GetCq();
-      auto h = std::coroutine_handle<promise_type>::from_promise(coroutine.m_promise);
+      promise_type* promise = std::exchange(coroutine.m_promise, nullptr);
+      coroutine.m_status = Status::Done;
+      promise->statusStorage = nullptr;
+      promise->completionQueue = executor.GetCq();
+      auto h = std::coroutine_handle<promise_type>::from_promise(*promise);
       Resume(h);
     }
-
-    struct [[nodiscard]] Subroutine {
-    public:
-      Subroutine() = default;
-      Subroutine(promise_type& promise)
-        : m_promise(&promise)
-        , m_resume(GetResult(std::coroutine_handle<promise_type>::from_promise(promise)))
-      {
-        m_promise->resumeStorage = &m_resume;
-      }
-      Subroutine(Subroutine&& other) noexcept
-        : m_promise(std::exchange(other.m_promise, nullptr))
-        , m_resume(other.m_resume)
-      {
-        if (m_promise) {
-          m_promise->resumeStorage = &m_resume;
-        }
-      }
-      Subroutine& operator=(Subroutine&& other) noexcept
-      {
-        std::swap(m_promise, other.m_promise);
-        if (m_promise) {
-          m_promise->resumeStorage = &m_resume;
-        }
-        if (other.m_promise) {
-          other.m_promise->resumeStorage = &other.m_resume;
-        }
-        return *this;
-      }
-      ~Subroutine() {
-        assert(!m_promise);
-      }
-
-      explicit operator bool() const { return m_promise; }
-
-      bool await_ready() { return m_resume != ResumeResult::Suspended; }
-      void await_suspend(std::coroutine_handle<promise_type> parent) {
-        m_promise->parent = parent;
-      }
-      inline bool await_resume() {
-        m_promise = nullptr;
-        return m_resume == ResumeResult::Done;
-      }
-
-    private:
-      promise_type* m_promise = nullptr;
-      ResumeResult m_resume = ResumeResult::Done;
-    };
 
     // Start a subroutine on the same executor as the current coroutine
     // Needs to be immediately co_await'ed
     // The subroutine will run start running immediatly
     struct [[nodiscard]] StartSubroutine {
       StartSubroutine(Coroutine&& coro)
-        : m_promise(coro.m_promise)
-      {}
+        : m_promise(std::exchange(coro.m_promise, nullptr))
+      {
+        assert(m_promise);
+        coro.m_status = Status::Done;
+        m_promise->statusStorage = &m_status;
+      }
 
       bool await_ready() { return false; }
       bool await_suspend(std::coroutine_handle<promise_type> cur) {
-        m_promise.completionQueue = cur.promise().completionQueue;
-        Coroutine::Resume(std::coroutine_handle<promise_type>::from_promise(m_promise));
-        return false;
+        m_promise->completionQueue = cur.promise().completionQueue;
+        Coroutine::Resume(std::coroutine_handle<promise_type>::from_promise(*m_promise));
+        return false; // always return to caller
       }
 
-      Subroutine await_resume() {
-        return Subroutine(m_promise);
+      Coroutine await_resume() {
+        if (m_status == Status::Suspended) {
+          return Coroutine(m_promise);
+        }
+        return Coroutine();
       }
 
     private:
-      promise_type& m_promise;
+      promise_type* m_promise;
+      Status m_status;
     };
 
   private:
-
-    inline Coroutine(promise_type& promise)
-      : m_promise(promise)
-    {}
-
-    Coroutine() = delete;
     Coroutine(const Coroutine&) = delete;
-    Coroutine(Coroutine&&) = delete;
     Coroutine& operator=(const Coroutine&) = delete;
-    Coroutine& operator=(Coroutine&&) = delete;
 
-    promise_type& m_promise;
+    promise_type* m_promise = nullptr;
+    Status m_status = Status::Unstarted;
   };
 
   // TFunc must be calling an action queuing the provided tag to a completion queue managed by CompletionQueueThread

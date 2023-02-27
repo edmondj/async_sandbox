@@ -32,55 +32,71 @@ static async_grpc::ServerBidirectionalStreamCoroutine BidirectionalStreamEchoImp
   echo_service::BidirectionalStreamEchoRequest request;
   echo_service::BidirectionalStreamEchoResponse response;
   async_grpc::Alarm<std::chrono::system_clock::time_point> alarm;
-  async_grpc::Coroutine::Subroutine subroutine;
+  async_grpc::Coroutine subroutine;
   uint32_t delay_ms = 0;
 
+  std::cout << "Started bidirectional stream" << std::endl;
   while (co_await context->Read(request)) {
+    std::cout << "Received message" << std::endl;
     switch (request.command_case()) {
     case echo_service::BidirectionalStreamEchoRequest::CommandCase::kMessage: {
+      std::cout << "Got message" << std::endl;
       if (subroutine) {
+        std::cout << "Failed precondition" << std::endl;
+        alarm.Cancel();
+        co_await std::move(subroutine);
         co_await context->Finish(grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Can not change message while running"));
         co_return;
       }
+      std::cout << "Setting message" << std::endl;
       response.set_message(std::move(*request.mutable_message()->mutable_message()));
       delay_ms = request.message().delay_ms();
       break;
     }
     case echo_service::BidirectionalStreamEchoRequest::CommandCase::kStart: {
+      std::cout << "Got start" << std::endl;
       if (subroutine) {
+        std::cout << "Failed precondition" << std::endl;
+        alarm.Cancel();
+        co_await std::move(subroutine);
         co_await context->Finish(grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Can not start when already started"));
         co_return;
       }
       if (response.message().empty() || delay_ms == 0) {
+        std::cout << "Failed precondition" << std::endl;
         co_await context->Finish(grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Can not start with invalid message set"));
         co_return;
       }
       subroutine = co_await async_grpc::Coroutine::StartSubroutine([&]() -> async_grpc::Coroutine {
         while (true) {
+          std::cout << "Write subroutine waiting" << std::endl;
           alarm = async_grpc::Alarm(std::chrono::system_clock::now() + std::chrono::milliseconds(delay_ms));
           if (!co_await alarm) {
             break;
           }
+          std::cout << "Write subroutine writing" << std::endl;
           if (!co_await context->Write(response)) {
             break;
           }
         }
+        std::cout << "Write subroutine stopping" << std::endl;
       }());
       break;
     }
     case echo_service::BidirectionalStreamEchoRequest::CommandCase::kStop: {
+      std::cout << "Got stop" << std::endl;
       if (!subroutine) {
         co_await context->Finish(grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Can not stop when not running"));
         co_return;
       }
       alarm.Cancel();
-      co_await subroutine;
+      co_await std::move(subroutine);
       break;
     }
     default:
       if (subroutine) {
         alarm.Cancel();
-        co_await subroutine;
+        co_await std::move(subroutine);
       }
       co_await context->Finish(grpc::Status(grpc::StatusCode::INTERNAL, "Unhandled command case"));
       co_return;
@@ -88,7 +104,7 @@ static async_grpc::ServerBidirectionalStreamCoroutine BidirectionalStreamEchoImp
   }
   if (subroutine) {
     alarm.Cancel();
-    co_await subroutine;
+    co_await std::move(subroutine);
   }
   co_await context->Finish();
 }
