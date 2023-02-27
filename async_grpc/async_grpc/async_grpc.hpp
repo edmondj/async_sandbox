@@ -7,6 +7,8 @@
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/alarm.h>
 
+std::ostream& operator<<(std::ostream& out, const grpc::Status& status);
+
 namespace async_grpc {
 
   const char* StatusCodeString(grpc::StatusCode code);

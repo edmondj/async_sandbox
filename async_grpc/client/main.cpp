@@ -3,17 +3,10 @@
 #include <async_grpc/client.hpp>
 #include <protos/echo_service.grpc.pb.h>
 #include <protos/variable_service.grpc.pb.h>
+#include <utils/logs.hpp>
 
 using EchoClient = async_grpc::Client<echo_service::EchoService>;
 using VariableClient = async_grpc::Client<variable_service::VariableService>;
-
-std::ostream& operator<<(std::ostream& out, const grpc::Status& status) {
-  out << '[' << async_grpc::StatusCodeString(status.error_code());
-  if (!status.ok()) {
-    out << ':' << status.error_message();
-  }
-  return out << ']';
-}
 
 class Program {
 public:
@@ -38,59 +31,53 @@ public:
         return;
       }
     }
-    std::cout << "Unknown command" << std::endl;
+    utils::Log() << "Unknown command";
   }
 
 private:
-  std::ostream& Log() {
-    auto now = std::chrono::system_clock::now();
-    auto time = std::chrono::system_clock::to_time_t(now);
-    return std::cout << '<' << std::put_time(std::localtime(&time), "%F %T.") << std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000 << "> ";
-  }
-
   async_grpc::Coroutine Noop() {
-    Log() << "start" << std::endl;
+    utils::Log() << "Start";
     co_await[this]() -> async_grpc::Coroutine {
-      Log() << "start sub1" << std::endl;
+      utils::Log() << "Start sub1";
       co_await[this]() -> async_grpc::Coroutine {
-        Log() << "sub2" << std::endl;
+        utils::Log() << "Sub2";
         co_return;
       }();
-      Log() << "end sub1" << std::endl;
+      utils::Log() << "End sub1";
     }();
-    Log() << "end" << std::endl;
+    utils::Log() << "End";
   }
 
   async_grpc::Coroutine NestedEcho() {
-    Log() << "start" << std::endl;
+    utils::Log() << "Start";
     co_await[this]() -> async_grpc::Coroutine {
-      Log() << "start sub1" << std::endl;
+      utils::Log() << "Start sub1";
       co_await[this]() -> async_grpc::Coroutine {
-        Log() << "start sub2" << std::endl;
+        utils::Log() << "Start sub2";
         echo_service::UnaryEchoRequest request;
         request.set_message("hello");
         echo_service::UnaryEchoResponse response;
         grpc::Status status;
         grpc::ClientContext context;
+        utils::Log() << "Sending [" << request.ShortDebugString() << ']';
         if (co_await m_echo.CallUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, UnaryEcho), context, request, response, status)) {
-          std::ostream& out = Log() << status;
+          auto& out = utils::Log() << "Received [" << status << ']';
           if (status.ok()) {
-            out << ' ' << response.message();
+            out << " [" << response.ShortDebugString() << ']';
           }
-          out << std::endl;
         }
         else {
-          Log() << "cancelled" << std::endl;
+          utils::Log() << "Cancelled";
         }
-        Log() << "end sub2" << std::endl;
+        utils::Log() << "End sub2";
       }();
-      Log() << "end sub1" << std::endl;
+      utils::Log() << "End sub1";
     }();
-    Log() << "end" << std::endl;
+    utils::Log() << "End";
   }
 
   async_grpc::Coroutine UnaryEcho() {
-    Log() << "start" << std::endl;
+    utils::Log() << "Start";
     echo_service::UnaryEchoRequest request;
     request.set_message("hello");
 
@@ -101,140 +88,142 @@ private:
     auto retryOptions = async_grpc::RetryOptions(
       [this, policy = async_grpc::DefaultRetryPolicy()](const grpc::Status& status) mutable {
         auto sent = policy(status);
-        Log() << "got " << status << (sent ? " will " : " will not ") << "retry" << std::endl;
+        utils::Log() << "Got [" << status << (sent ? "] will " : "] will not ") << "retry";
         return sent;
       },
       async_grpc::DefaultClientContextProvider{}
     );
 
+    utils::Log() << "Sending [" << request.ShortDebugString() << ']';
     if (co_await m_echo.AutoRetryUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, UnaryEcho), context, request, response, status, retryOptions)) {
-      std::ostream& out = Log() << status;
+      auto& out = utils::Log() << "Received [" << status << ']';
       if (status.ok()) {
-        out << ' ' << response.message();
+        out << " [" << response.ShortDebugString() << ']';
       }
-      out << std::endl;
     }
     else {
-      Log() << "cancelled" << std::endl;
+      utils::Log() << "Cancelled";
     }
-    Log() << "end" << std::endl;
+    utils::Log() << "End";
   }
 
   async_grpc::Coroutine ClientStreamEcho() {
-    Log() << "start" << std::endl;
+    utils::Log() << "Start";
     echo_service::ClientStreamEchoResponse response;
     grpc::ClientContext context;
     auto call = co_await m_echo.CallClientStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, ClientStreamEcho), m_executor.GetExecutor(), context, response);
     if (!call) {
-      Log() << "start cancelled" << std::endl;
+      utils::Log() << "Cancelled";
       co_return;
     }
     echo_service::ClientStreamEchoRequest request;
     for (auto&& msg : { "Hello!", "World!", "Bye!" }) {
-      Log() << "writing " << msg << std::endl;
       request.set_message(msg);
+      utils::Log() << "Sending [" << request.ShortDebugString() << "]";
       if (!co_await call->Write(request)) {
-        Log() << "write cancelled" << std::endl;
+        utils::Log() << "Cancelled";
         co_return;
       }
     }
-    Log() << "done" << std::endl;
+    utils::Log() << "Closing write stream";
     if (!co_await call->WritesDone()) {
-      Log() << "done cancelled" << std::endl;
+      utils::Log() << "Cancelled";
       co_return;
     }
     grpc::Status status;
+    utils::Log() << "Awaiting response";
     if (!co_await call->Finish(status)) {
-      Log() << "finish cancelled" << std::endl;
+      utils::Log() << "Cancelled";
     } else {
-      auto& out = Log() << status;
+      auto& out = utils::Log() << "Received [" << status << ']';
       if (status.ok()) {
-        for (const std::string& msg : response.messages()) {
-          out << ' ' << msg;
-        }
-        out << std::endl;
+        out << response.ShortDebugString();
       }
     }
-    Log() << "end" << std::endl;
+    utils::Log() << "End";
   }
 
   async_grpc::Coroutine ServerStreamEcho() {
-    Log() << "start" << std::endl;
+    utils::Log() << "Start";
     echo_service::ServerStreamEchoRequest request;
     request.set_message("hola");
     request.set_count(3);
     request.set_delay_ms(1000);
     grpc::ClientContext context;
+    utils::Log() << "Sending [" << request.ShortDebugString() << ']';
     auto call = co_await m_echo.CallServerStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, ServerStreamEcho), m_executor.GetExecutor(), context, request);
     if (!call) {
-      Log() << "start cancelled" << std::endl;
+      utils::Log() << "Cancelled";
       co_return;
     }
     echo_service::ServerStreamEchoResponse response;
-    Log() << "start read" << std::endl;
+    utils::Log() << "Start Read";
     while (co_await call->Read(response)) {
-      Log() << response.message() << ' ' << response.n() << std::endl;
+      utils::Log() << "Received [" << response.ShortDebugString() << ']';
     }
-    Log() << "done read" << std::endl;
+    utils::Log() << "Read done, getting status...";
     grpc::Status status;
     if (!co_await call->Finish(status)) {
-      Log() << "finish cancelled" << std::endl;
+      utils::Log() << "Cancelled";
     }
     else {
-      Log() << status << std::endl;
+      utils::Log() << "Received [" << status << ']';
     }
-    Log() << "end" << std::endl;
+    utils::Log() << "End";
   }
 
   async_grpc::Coroutine BidirectionalStreamEcho() {
-    Log() << "start" << std::endl;
+    utils::Log() << "Start";
     grpc::ClientContext context;
     auto call = co_await m_echo.CallBidirectionalStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, BidirectionalStreamEcho), m_executor.GetExecutor(), context);
     if (!call) {
-      Log() << "start cancelled" << std::endl;
+      utils::Log() << "Cancelled";
       co_return;
     }
+    utils::Log() << "Starting read subroutine...";
     async_grpc::Coroutine readCoroutine = co_await async_grpc::Coroutine::StartSubroutine([&]() -> async_grpc::Coroutine {
+      utils::Log() << "Read subroutine started";
       echo_service::BidirectionalStreamEchoResponse response;
       while (co_await call->Read(response)) {
-        Log() << response.message() << std::endl;
+        utils::Log() << "Received [" << response.ShortDebugString() << ']';
       }
-      Log() << "read done" << std::endl;
+      utils::Log() << "Read subroutine done";
     }());
     echo_service::BidirectionalStreamEchoRequest request;
     auto* message = request.mutable_message();
     message->set_message("guten tag");
     message->set_delay_ms(1000);
-    Log() << "write message" << std::endl;
+    utils::Log() << "Sending [" << request.ShortDebugString() << ']';
     if (!co_await call->Write(request)) {
-      Log() << "write cancelled" << std::endl;
+      utils::Log() << "Cancelled";
       co_return;
     }
     request.mutable_start();
-    Log() << "write start" << std::endl;
+    utils::Log() << "Sending [" << request.ShortDebugString() << ']';
     if (!co_await call->Write(request)) {
-      Log() << "write cancelled" << std::endl;
+      utils::Log() << "Cancelled";
       co_return;
     }
-    Log() << "wait" << std::endl;
+    utils::Log() << "Waiting";
     if (!co_await async_grpc::Alarm(std::chrono::system_clock::now() + std::chrono::milliseconds(3500))) {
-      Log() << "wait cancelled" << std::endl;
+      utils::Log() << "Cancelled";
       co_return;
     }
     request.mutable_stop();
-    Log() << "write stop" << std::endl;
+    utils::Log() << "Sending [" << request.ShortDebugString() << ']';
     if (!co_await call->Write(request)) {
-      Log() << "write cancelled" << std::endl;
+      utils::Log() << "Cancelled";
       co_return;
     }
+    utils::Log() << "Closing write stream";
     if (!co_await call->WritesDone()) {
-      Log() << "writes done cancelled" << std::endl;
+      utils::Log() << "Cancelled";
       co_return;
     }
-    Log() << "wait read" << std::endl;
+    utils::Log() << "Stopping subroutine";
     context.TryCancel(); // Cancel pending read
     co_await std::move(readCoroutine);
-    Log() << "end" << std::endl;
+    utils::Log() << "End";
   }
 
   EchoClient m_echo;

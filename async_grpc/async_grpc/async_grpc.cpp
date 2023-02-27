@@ -1,5 +1,14 @@
 #include <coroutine>
 #include "async_grpc.hpp"
+#include <iostream>
+
+std::ostream& operator<<(std::ostream& out, const grpc::Status& status) {
+  out << async_grpc::StatusCodeString(status.error_code());
+  if (!status.ok()) {
+    out << ':' << status.error_message();
+  }
+  return out;
+}
 
 namespace async_grpc {
   

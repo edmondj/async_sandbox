@@ -34,4 +34,5 @@ function(setup_target_compile_options t)
 	endif ()
 endfunction()
 
+add_subdirectory("utils")
 add_subdirectory("async_grpc")
