@@ -66,7 +66,9 @@ namespace async_grpc {
 
   class ServerContext {
   public:
-    explicit ServerContext(ServerExecutor& executor);
+    inline explicit ServerContext(ServerExecutor& executor)
+      : executor(executor)
+    {}
 
     ServerExecutor& executor;
     grpc::ServerContext context;
@@ -86,7 +88,7 @@ namespace async_grpc {
 
     void await_suspend(std::coroutine_handle<Coroutine::promise_type> h) {
       m_promise = &h.promise();
-      m_func(*m_context, m_promise->completionQueue, static_cast<grpc::ServerCompletionQueue*>(m_promise->completionQueue), h.address());
+      m_func(*m_context, m_context->executor.GetCq(), m_context->executor.GetNotifCq(), h.address());
     }
 
     std::unique_ptr<TContext> await_resume() {

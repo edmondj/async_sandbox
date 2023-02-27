@@ -14,10 +14,6 @@ namespace async_grpc {
     return m_cq.get();
   }
 
-  ServerContext::ServerContext(ServerExecutor& executor)
-    : executor(executor)
-  {}
-
   Server::Server(ServerOptions&& options)
   {
     grpc::ServerBuilder builder;

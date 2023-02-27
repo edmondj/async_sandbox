@@ -180,7 +180,7 @@ namespace async_grpc {
 
     private:
       promise_type* m_promise;
-      Status m_status;
+      Status m_status = Status::Unstarted;
     };
 
   private:
