@@ -18,23 +18,25 @@ namespace async_grpc {
     : executor(executor)
   {}
 
-  Server::Server(ServerOptions options)
-    : m_options(std::move(options))
+  Server::Server(ServerOptions&& options)
   {
     grpc::ServerBuilder builder;
-    for (const std::string& addr : m_options.addresses) {
+    for (const std::string& addr : options.addresses) {
       builder.AddListeningPort(addr, grpc::InsecureServerCredentials());
     }
-    for (IServiceImpl& service : m_options.services) {
+    for (IServiceImpl& service : options.services) {
       builder.RegisterService(service.GetGrpcService());
     }
-    m_executors.reserve(m_options.executorCount);
-    for (size_t i = 0; i < m_options.executorCount; ++i) {
+    m_executors.reserve(options.executorCount);
+    for (size_t i = 0; i < options.executorCount; ++i) {
       m_executors.emplace_back(ServerExecutor(builder.AddCompletionQueue()));
+    }
+    if (options.options) {
+      builder.SetOption(std::move(options.options));
     }
     m_server = builder.BuildAndStart();
 
-    for (IServiceImpl& service : m_options.services) {
+    for (IServiceImpl& service : options.services) {
       service.StartListening(*this);
     }
   }

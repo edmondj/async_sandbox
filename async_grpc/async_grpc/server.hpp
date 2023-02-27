@@ -46,6 +46,7 @@ namespace async_grpc {
     std::vector<std::string> addresses;
     std::vector<std::reference_wrapper<IServiceImpl>> services;
     size_t executorCount = 2;
+    std::unique_ptr<grpc::ServerBuilderOption> options;
   };
 
   using ServerListenCoroutine = Coroutine;
@@ -303,7 +304,7 @@ namespace async_grpc {
 
     template<typename TService, AsyncServiceBase<TService> TServiceBase>
     static auto Listen(TService& service, TBidirectionalStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc, ServerExecutor& executor) {
-      return ListenAwaitable(std::make_unique<ServerBidirectionalStreamContext>(executor), [&](ServerBidirectionalStreamContext& context, grpc::CompletionQueue* cq, grpc::ServerCompletionQueue* notif_cq, void* tag) mutable {
+      return ListenAwaitable(std::make_unique<ServerBidirectionalStreamContext>(executor), [&service, listenFunc](ServerBidirectionalStreamContext& context, grpc::CompletionQueue* cq, grpc::ServerCompletionQueue* notif_cq, void* tag) mutable {
         (service.GetConcreteGrpcService().*listenFunc)(&context.context, &context.m_stream, cq, notif_cq, tag);
       });
     }
@@ -325,7 +326,7 @@ namespace async_grpc {
 
   class Server {
   public:
-    explicit Server(ServerOptions options);
+    explicit Server(ServerOptions&& options);
 
     // Will call Shutdown, see Shutdown
     ~Server();
@@ -375,7 +376,6 @@ namespace async_grpc {
   private:
     ServerExecutor& SelectNextExecutor();
 
-    ServerOptions m_options;
     std::unique_ptr<grpc::Server> m_server;
 
     std::vector<ServerExecutorThread> m_executors;
