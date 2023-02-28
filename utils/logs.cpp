@@ -13,9 +13,17 @@ namespace utils {
       << std::setfill('0') << std::setw(3) << std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000
       << "> ";
   }
+  
+  Log::Log(Log&& other) noexcept
+    : out(std::move(other.out))
+  {
+    other.out.setstate(std::ios_base::badbit);
+  }
 
   Log::~Log() {
-    std::cout << out.str() << std::endl;
+    if (out) {
+      std::cout << out.str() << std::endl;
+    }
   }
 
 }

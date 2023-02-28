@@ -2,12 +2,12 @@
 #include <functional>
 
 void VariableServiceImpl::StartListening(async_grpc::Server& server) {
-  server.Spawn(server.StartListeningUnary(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, Write), std::bind_front(&VariableServiceImpl::WriteImpl, this)));
-  server.Spawn(server.StartListeningUnary(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, Read), std::bind_front(&VariableServiceImpl::ReadImpl, this)));
-  server.Spawn(server.StartListeningUnary(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, Del), std::bind_front(&VariableServiceImpl::DelImpl, this)));
+  StartListeningUnary(server, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, Write), std::bind_front(&VariableServiceImpl::WriteImpl, this));
+  StartListeningUnary(server, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, Read), std::bind_front(&VariableServiceImpl::ReadImpl, this));
+  StartListeningUnary(server, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, Del), std::bind_front(&VariableServiceImpl::DelImpl, this));
 }
 
-async_grpc::ServerUnaryCoroutine VariableServiceImpl::WriteImpl(std::unique_ptr<async_grpc::ServerUnaryContext<variable_service::WriteRequest, variable_service::WriteResponse>> context) {
+async_grpc::Coroutine VariableServiceImpl::WriteImpl(std::unique_ptr<async_grpc::ServerUnaryContext<variable_service::WriteRequest, variable_service::WriteResponse>> context) {
   variable_service::WriteResponse response;
   // The forbidden upsert
   auto [it, was_inserted] = m_storage.insert_or_assign(context->request.key(), context->request.value());
@@ -16,7 +16,7 @@ async_grpc::ServerUnaryCoroutine VariableServiceImpl::WriteImpl(std::unique_ptr<
   co_await context->Finish(response);
 }
 
-async_grpc::ServerUnaryCoroutine VariableServiceImpl::ReadImpl(std::unique_ptr<async_grpc::ServerUnaryContext<variable_service::ReadRequest, variable_service::ReadResponse>> context)
+async_grpc::Coroutine VariableServiceImpl::ReadImpl(std::unique_ptr<async_grpc::ServerUnaryContext<variable_service::ReadRequest, variable_service::ReadResponse>> context)
 {
   auto found = m_storage.find(context->request.key());
   if (found == m_storage.end()) {
@@ -28,7 +28,7 @@ async_grpc::ServerUnaryCoroutine VariableServiceImpl::ReadImpl(std::unique_ptr<a
   }
 }
 
-async_grpc::ServerUnaryCoroutine VariableServiceImpl::DelImpl(std::unique_ptr<async_grpc::ServerUnaryContext<variable_service::DelRequest, variable_service::DelResponse>> context) {
+async_grpc::Coroutine VariableServiceImpl::DelImpl(std::unique_ptr<async_grpc::ServerUnaryContext<variable_service::DelRequest, variable_service::DelResponse>> context) {
   bool was_deleted = m_storage.erase(context->request.key());
   variable_service::DelResponse response;
   response.set_was_deleted(was_deleted);

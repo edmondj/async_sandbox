@@ -3,7 +3,7 @@
 #include <utils/Logs.hpp>
 #include "echo_service_impl.hpp"
 
-static async_grpc::ServerUnaryCoroutine UnaryEchoImpl(std::unique_ptr<async_grpc::ServerUnaryContext<echo_service::UnaryEchoRequest, echo_service::UnaryEchoResponse>> context) {
+static async_grpc::Coroutine UnaryEchoImpl(std::unique_ptr<async_grpc::ServerUnaryContext<echo_service::UnaryEchoRequest, echo_service::UnaryEchoResponse>> context) {
   utils::Log() << "Received UnaryEcho [" << context->request.ShortDebugString() << ']';
   echo_service::UnaryEchoResponse response;
   response.set_message(std::move(*context->request.mutable_message()));
@@ -12,7 +12,7 @@ static async_grpc::ServerUnaryCoroutine UnaryEchoImpl(std::unique_ptr<async_grpc
   utils::Log() << "End of UnaryEcho";
 }
 
-static async_grpc::ServerClientStreamCoroutine ClientStreamEchoImpl(std::unique_ptr<async_grpc::ServerClientStreamContext<echo_service::ClientStreamEchoRequest, echo_service::ClientStreamEchoResponse>> context) {
+static async_grpc::Coroutine ClientStreamEchoImpl(std::unique_ptr<async_grpc::ServerClientStreamContext<echo_service::ClientStreamEchoRequest, echo_service::ClientStreamEchoResponse>> context) {
   utils::Log() << "Received ClientStreamEcho";
   echo_service::ClientStreamEchoResponse response;
   echo_service::ClientStreamEchoRequest request;
@@ -26,7 +26,7 @@ static async_grpc::ServerClientStreamCoroutine ClientStreamEchoImpl(std::unique_
   utils::Log() << "End of ClientStreamEcho";
 }
 
-static async_grpc::ServerServerStreamCoroutine ServerStreamEchoImpl(std::unique_ptr<async_grpc::ServerServerStreamContext<echo_service::ServerStreamEchoRequest, echo_service::ServerStreamEchoResponse>> context) {
+static async_grpc::Coroutine ServerStreamEchoImpl(std::unique_ptr<async_grpc::ServerServerStreamContext<echo_service::ServerStreamEchoRequest, echo_service::ServerStreamEchoResponse>> context) {
   utils::Log() << "Received ServerstreamEcho [" << context->request.ShortDebugString() << ']';
   echo_service::ServerStreamEchoResponse response;
   response.set_message(std::move(*context->request.mutable_message()));
@@ -41,7 +41,7 @@ static async_grpc::ServerServerStreamCoroutine ServerStreamEchoImpl(std::unique_
   co_await context->Finish();
 }
 
-static async_grpc::ServerBidirectionalStreamCoroutine BidirectionalStreamEchoImpl(std::unique_ptr<async_grpc::ServerBidirectionalStreamContext<echo_service::BidirectionalStreamEchoRequest, echo_service::BidirectionalStreamEchoResponse>> context) {
+static async_grpc::Coroutine BidirectionalStreamEchoImpl(std::unique_ptr<async_grpc::ServerBidirectionalStreamContext<echo_service::BidirectionalStreamEchoRequest, echo_service::BidirectionalStreamEchoResponse>> context) {
   echo_service::BidirectionalStreamEchoRequest request;
   echo_service::BidirectionalStreamEchoResponse response;
   grpc::Status status;
@@ -117,8 +117,8 @@ static async_grpc::ServerBidirectionalStreamCoroutine BidirectionalStreamEchoImp
 
 void EchoServiceImpl::StartListening(async_grpc::Server& server)
 {
-  server.Spawn(server.StartListeningUnary(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, UnaryEcho), &UnaryEchoImpl));
-  server.Spawn(server.StartListeningClientStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, ClientStreamEcho), &ClientStreamEchoImpl));
-  server.Spawn(server.StartListeningServerStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, ServerStreamEcho), &ServerStreamEchoImpl));
-  server.Spawn(server.StartListeningBidirectionalStream(*this, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, BidirectionalStreamEcho), &BidirectionalStreamEchoImpl));
+  StartListeningUnary(server, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, UnaryEcho), &UnaryEchoImpl);
+  StartListeningClientStream(server, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, ClientStreamEcho), &ClientStreamEchoImpl);
+  StartListeningServerStream(server, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, ServerStreamEcho), &ServerStreamEchoImpl);
+  StartListeningBidirectionalStream(server, ASYNC_GRPC_SERVER_LISTEN_FUNC(Service, BidirectionalStreamEcho), &BidirectionalStreamEchoImpl);
 }

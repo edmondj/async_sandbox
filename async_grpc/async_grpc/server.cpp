@@ -46,9 +46,9 @@ namespace async_grpc {
     m_server->Shutdown();
   }
 
-  void Server::Spawn(ServerListenCoroutine&& coroutine)
+  void Server::Spawn(Coroutine&& coroutine)
   {
-    ServerListenCoroutine::Spawn(SelectNextExecutor(), std::move(coroutine));
+    Coroutine::Spawn(SelectNextExecutor(), std::move(coroutine));
   }
 
   ServerExecutor& Server::SelectNextExecutor()

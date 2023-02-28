@@ -61,7 +61,7 @@ private:
         grpc::ClientContext context;
         utils::Log() << "Sending [" << request.ShortDebugString() << ']';
         if (co_await m_echo.CallUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, UnaryEcho), context, request, response, status)) {
-          auto& out = utils::Log() << "Received [" << status << ']';
+          auto out = utils::Log() << "Received [" << status << ']';
           if (status.ok()) {
             out << " [" << response.ShortDebugString() << ']';
           }
@@ -96,7 +96,7 @@ private:
 
     utils::Log() << "Sending [" << request.ShortDebugString() << ']';
     if (co_await m_echo.AutoRetryUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, UnaryEcho), context, request, response, status, retryOptions)) {
-      auto& out = utils::Log() << "Received [" << status << ']';
+      auto out = utils::Log() << "Received [" << status << ']';
       if (status.ok()) {
         out << " [" << response.ShortDebugString() << ']';
       }
@@ -135,9 +135,9 @@ private:
     if (!co_await call->Finish(status)) {
       utils::Log() << "Cancelled";
     } else {
-      auto& out = utils::Log() << "Received [" << status << ']';
+      auto out = utils::Log() << "Received [" << status << ']';
       if (status.ok()) {
-        out << response.ShortDebugString();
+        out << '[' << response.ShortDebugString() << ']';
       }
     }
     utils::Log() << "End";

@@ -9,9 +9,9 @@ public:
   virtual void StartListening(async_grpc::Server& server) override;
 
 private:
-  async_grpc::ServerUnaryCoroutine WriteImpl(std::unique_ptr<async_grpc::ServerUnaryContext<variable_service::WriteRequest, variable_service::WriteResponse>> context);
-  async_grpc::ServerUnaryCoroutine ReadImpl(std::unique_ptr<async_grpc::ServerUnaryContext<variable_service::ReadRequest, variable_service::ReadResponse>> context);
-  async_grpc::ServerUnaryCoroutine DelImpl(std::unique_ptr<async_grpc::ServerUnaryContext<variable_service::DelRequest, variable_service::DelResponse>> context);
+  async_grpc::Coroutine WriteImpl(std::unique_ptr<async_grpc::ServerUnaryContext<variable_service::WriteRequest, variable_service::WriteResponse>> context);
+  async_grpc::Coroutine ReadImpl(std::unique_ptr<async_grpc::ServerUnaryContext<variable_service::ReadRequest, variable_service::ReadResponse>> context);
+  async_grpc::Coroutine DelImpl(std::unique_ptr<async_grpc::ServerUnaryContext<variable_service::DelRequest, variable_service::DelResponse>> context);
 
   std::map<std::string, int64_t> m_storage;
 };
