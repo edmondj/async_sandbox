@@ -111,7 +111,7 @@ private:
     utils::Log() << "Start";
     echo_service::ClientStreamEchoResponse response;
     grpc::ClientContext context;
-    auto call = co_await m_echo.CallClientStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, ClientStreamEcho), m_executor.GetExecutor(), context, response);
+    auto call = co_await m_echo.CallClientStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, ClientStreamEcho), context, response);
     if (!call) {
       utils::Log() << "Cancelled";
       co_return;
@@ -151,7 +151,7 @@ private:
     request.set_delay_ms(1000);
     grpc::ClientContext context;
     utils::Log() << "Sending [" << request.ShortDebugString() << ']';
-    auto call = co_await m_echo.CallServerStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, ServerStreamEcho), m_executor.GetExecutor(), context, request);
+    auto call = co_await m_echo.CallServerStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, ServerStreamEcho), context, request);
     if (!call) {
       utils::Log() << "Cancelled";
       co_return;
@@ -175,7 +175,7 @@ private:
   async_grpc::Coroutine BidirectionalStreamEcho() {
     utils::Log() << "Start";
     grpc::ClientContext context;
-    auto call = co_await m_echo.CallBidirectionalStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, BidirectionalStreamEcho), m_executor.GetExecutor(), context);
+    auto call = co_await m_echo.CallBidirectionalStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, BidirectionalStreamEcho), context);
     if (!call) {
       utils::Log() << "Cancelled";
       co_return;

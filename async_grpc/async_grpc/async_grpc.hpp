@@ -191,11 +191,25 @@ namespace async_grpc {
     Status m_status = Status::Unstarted;
   };
 
-  // TFunc must be calling an action queuing the provided tag to a completion queue managed by CompletionQueueThread
-  template<std::invocable<grpc::CompletionQueue*, void*> TFunc>
-  class [[nodiscard]] Awaitable {
+  struct AwaitData {
+    grpc::CompletionQueue* cq;
+    void* tag;
+
+    static inline AwaitData FromHandle(std::coroutine_handle<Coroutine::promise_type> h) {
+      return {
+        .cq = h.promise().completionQueue,
+        .tag = h.address()
+      };
+    }
+  };
+
+  struct Empty {};
+
+  // Only use for awaitable that will enque something in the completion queue
+  template<std::invocable<const AwaitData&> TFunc>
+  class [[nodiscard]] CompletionQueueAwaitable {
   public:
-    Awaitable(TFunc func)
+    explicit CompletionQueueAwaitable(TFunc func)
       : m_func(std::move(func))
     {}
 
@@ -205,25 +219,34 @@ namespace async_grpc {
 
     void await_suspend(std::coroutine_handle<Coroutine::promise_type> h) {
       m_promise = &h.promise();
-      m_func(m_promise->completionQueue, h.address());
+      auto data = AwaitData::FromHandle(h);
+      if constexpr (std::is_void_v<ResultType>) {
+        m_func(data);
+      } else {
+        m_result = m_func(data);
+      }
     }
 
-    bool await_resume() {
-      return !m_promise->cancelled;
+    auto await_resume() {
+      bool ok = !m_promise->cancelled;
+      if constexpr (std::is_void_v<ResultType>) {
+        return ok;
+      } else {
+        if (ok) {
+          return std::move(m_result);
+        } else {
+          return std::optional<ResultType>{};
+        }
+      }
     }
 
   private:
+    using ResultType = std::invoke_result_t<TFunc, const AwaitData&>;
+
     TFunc m_func;
     Coroutine::promise_type* m_promise = nullptr;
+    [[no_unique_address]] std::conditional_t<std::is_void_v<ResultType>, Empty, std::optional<ResultType>> m_result = {};
   };
-
-  template<typename T>
-  constexpr bool IsAwaitable = false;
-  template<typename T>
-  constexpr bool IsAwaitable<Awaitable<T>> = true;
-
-  template<typename T>
-  concept IsAwaitableConcept = IsAwaitable<T> || IsAwaitable<decltype(std::declval<T>().operator co_await())>;
 
   bool CompletionQueueTick(grpc::CompletionQueue* cq);
   void CompletionQueueShutdown(grpc::CompletionQueue* cq);
@@ -262,8 +285,8 @@ namespace async_grpc {
     Alarm& operator=(Alarm&&) = default;
 
     auto Start() {
-      return Awaitable([&](grpc::CompletionQueue* cq, void* tag) {
-        m_alarm.Set(cq, m_deadline, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_alarm.Set(data.cq, m_deadline, data.tag);
       });
     }
 

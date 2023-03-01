@@ -56,21 +56,21 @@ namespace async_grpc {
     TRequest request;
 
     auto FinishWithError(const grpc::Status& status) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_response.FinishWithError(status, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_response.FinishWithError(status, data.tag);
       });
     }
 
     auto Finish(const TResponse& response, const grpc::Status& status = grpc::Status::OK) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_response.Finish(response, status, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_response.Finish(response, status, data.tag);
       });
     }
 
     template<typename TService, typename TServiceBase>
     auto Listen(ServerExecutor& executor, TService& service, TUnaryListenFunc<TServiceBase, TRequest, TResponse> listenFunc) {
-      return Awaitable([&, listenFunc](grpc::CompletionQueue*, void* tag) {
-        (service.*listenFunc)(&context, &request, &m_response, executor.GetCq(), executor.GetNotifCq(), tag);
+      return CompletionQueueAwaitable([&, listenFunc](const AwaitData& data) {
+        (service.*listenFunc)(&context, &request, &m_response, executor.GetCq(), executor.GetNotifCq(), data.tag);
       });
     }
 
@@ -98,27 +98,27 @@ namespace async_grpc {
     {}
 
     auto Read(TRequest& request) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_reader.Read(&request, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_reader.Read(&request, data.tag);
       });
     }
 
     auto FinishWithError(const grpc::Status& status) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_reader.FinishWithError(status, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_reader.FinishWithError(status, data.tag);
       });
     }
 
     auto Finish(const TResponse& response, const grpc::Status& status = grpc::Status::OK) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_reader.Finish(response, status, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_reader.Finish(response, status, data.tag);
       });
     }
 
     template<typename TService, typename TServiceBase>
     auto Listen(ServerExecutor& executor, TService& service, TClientStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc) {
-      return Awaitable([&, listenFunc](grpc::CompletionQueue*, void* tag) mutable {
-        (service.*listenFunc)(&context, &m_reader, executor.GetCq(), executor.GetNotifCq(), tag);
+      return CompletionQueueAwaitable([&, listenFunc](const AwaitData& data) mutable {
+        (service.*listenFunc)(&context, &m_reader, executor.GetCq(), executor.GetNotifCq(), data.tag);
       });
     }
 
@@ -148,33 +148,33 @@ namespace async_grpc {
     TRequest request;
 
     auto Write(const TResponse& response) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_writer.Write(response, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_writer.Write(response, data.tag);
       });
     }
 
     auto Write(const TResponse& response, grpc::WriteOptions options) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_writer.Write(response, options, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_writer.Write(response, options, data.tag);
       });
     }
 
     auto WriteAndFinish(const TResponse& response, grpc::WriteOptions options, const grpc::Status& status = grpc::Status::OK) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_writer.WriteAndFinish(response, options, status, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_writer.WriteAndFinish(response, options, status, data.tag);
       });
     }
 
     auto Finish(const grpc::Status& status = grpc::Status::OK) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_writer.Finish(status, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_writer.Finish(status, data.tag);
       });
     }
 
     template<typename TService, typename TServiceBase>
     auto Listen(ServerExecutor& executor, TService& service, TServerStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc) {
-      return Awaitable([&, listenFunc](grpc::CompletionQueue*, void* tag) mutable {
-        (service.*listenFunc)(&context, &request, &m_writer, executor.GetCq(), executor.GetNotifCq(), tag);
+      return CompletionQueueAwaitable([&, listenFunc](const AwaitData& data) mutable {
+        (service.*listenFunc)(&context, &request, &m_writer, executor.GetCq(), executor.GetNotifCq(), data.tag);
       });
     }
 
@@ -202,39 +202,39 @@ namespace async_grpc {
     {}
 
     auto Read(TRequest& request) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_stream.Read(&request, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_stream.Read(&request, data.tag);
       });
     }
 
     auto Write(const TResponse& response) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_stream.Write(response, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_stream.Write(response, data.tag);
       });
     }
 
     auto Write(const TResponse& response, grpc::WriteOptions options) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_stream.Write(response, options, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_stream.Write(response, options, data.tag);
       });
     }
 
     auto WriteAndFinish(const TResponse& response, grpc::WriteOptions options, const grpc::Status& status = grpc::Status::OK) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_stream.WriteAndFinish(response, options, status, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_stream.WriteAndFinish(response, options, status, data.tag);
       });
     }
 
     auto Finish(const grpc::Status& status = grpc::Status::OK) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_stream.Finish(status, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_stream.Finish(status, data.tag);
       });
     }
 
     template<typename TService, typename TServiceBase>
     auto Listen(ServerExecutor& executor, TService& service, TBidirectionalStreamListenFunc<TServiceBase, TRequest, TResponse> listenFunc) {
-      return Awaitable([&, listenFunc](grpc::CompletionQueue*, void* tag) mutable {
-        (service.*listenFunc)(&context, &m_stream, executor.GetCq(), executor.GetNotifCq(), tag);
+      return CompletionQueueAwaitable([&, listenFunc](const AwaitData& data) mutable {
+        (service.*listenFunc)(&context, &m_stream, executor.GetCq(), executor.GetNotifCq(), data.tag);
       });
     }
 

@@ -11,10 +11,6 @@ namespace async_grpc {
     return m_cq.get();
   }
 
-  ClientCall::ClientCall(const ClientExecutor& executor) noexcept
-    : executor(executor)
-  {}
-
   ChannelProvider::ChannelProvider(std::shared_ptr<grpc::Channel> channel) noexcept
       : m_channels(1, std::move(channel))
   {}

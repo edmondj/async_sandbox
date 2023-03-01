@@ -17,13 +17,6 @@ namespace async_grpc {
 
   using ClientExecutorThread = ExecutorThread<ClientExecutor>;
 
-  class ClientCall {
-  public:
-    ClientCall(const ClientExecutor& executor) noexcept;
-
-    const ClientExecutor& executor;
-  };
-
   class ChannelProvider {
   public:
     ChannelProvider(std::shared_ptr<grpc::Channel> channel) noexcept;
@@ -40,7 +33,7 @@ namespace async_grpc {
   template<typename T>
   concept RetryPolicyConcept = requires(T t, const grpc::Status& status) {
     { static_cast<bool>(t(status)) };
-    { *t(status) } -> IsAwaitableConcept;
+    { [&t, &status]() -> Coroutine { co_await *t(status); } };
   };
 
   class DefaultRetryPolicy {
@@ -99,8 +92,8 @@ namespace async_grpc {
     {}
 
     auto Finish(TResponse& response, grpc::Status& status) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_reader->Finish(&response, &status, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_reader->Finish(&response, &status, data.tag);
       });
     }
 
@@ -120,11 +113,10 @@ namespace async_grpc {
 
     bool await_ready() { return false; }
     bool await_suspend(std::coroutine_handle<Coroutine::promise_type> h) {
-      m_reader = (m_stub.*m_func)(&m_context, m_request, h.promise().completionQueue);
+      m_reader = (m_stub.*m_func)(&m_context, m_request, AwaitData::FromHandle(h).cq);
       return false;
     }
     ClientUnaryCall<TResponse> await_resume() {
-      m_reader->StartCall();
       return ClientUnaryCall<TResponse>(std::move(m_reader));
     }
 
@@ -136,72 +128,45 @@ namespace async_grpc {
     std::unique_ptr<grpc::ClientAsyncResponseReader<TResponse>> m_reader;
   };
 
-  // ~Unary
+   //~Unary
 
   // Client Stream
 
   template<typename TStub, typename TRequest, typename TResponse>
-  using TPrepareClientStreamFunc = std::unique_ptr<grpc::ClientAsyncWriter<TRequest>>(TStub::*)(grpc::ClientContext*, TResponse*, grpc::CompletionQueue*);
+  using TPrepareClientStreamFunc = std::unique_ptr<grpc::ClientAsyncWriter<TRequest>>(TStub::*)(grpc::ClientContext*, TResponse*, grpc::CompletionQueue*, void*);
 
   template<typename TRequest>
-  class [[nodiscard]] ClientClientStreamCall : public ClientCall {
+  class [[nodiscard]] ClientClientStreamCall  {
   public:
-    ClientClientStreamCall(const ClientExecutor& executor, std::unique_ptr<grpc::ClientAsyncWriter<TRequest>> writer)
-      : ClientCall(executor)
-      , m_writer(std::move(writer))
+    ClientClientStreamCall(std::unique_ptr<grpc::ClientAsyncWriter<TRequest>> writer)
+      : m_writer(std::move(writer))
     {}
 
     auto Write(const TRequest& msg) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_writer->Write(msg, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_writer->Write(msg, data.tag);
       });
     }
 
     auto Write(const TRequest& msg, grpc::WriteOptions options) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_writer->Write(msg, options, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_writer->Write(msg, options, data.tag);
       });
     }
 
     auto WritesDone() {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_writer->WritesDone(tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_writer->WritesDone(data.tag);
       });
     }
 
     auto Finish(grpc::Status& status) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_writer->Finish(&status, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_writer->Finish(&status, data.tag);
       });
     }
 
   private:
-    std::unique_ptr<grpc::ClientAsyncWriter<TRequest>> m_writer;
-  };
-
-  template<typename TRequest>
-  class [[nodiscard]] ClientClientStreamAwaitable {
-  public:
-    ClientClientStreamAwaitable(const ClientExecutor& executor, std::unique_ptr<grpc::ClientAsyncWriter<TRequest>> writer)
-      : m_executor(executor)
-      , m_writer(std::move(writer))
-    {}
-
-    bool await_ready() { return false; }
-    void await_suspend(std::coroutine_handle<Coroutine::promise_type> h) {
-      m_promise = &h.promise();
-      m_writer->StartCall(h.address());
-    }
-    std::optional<ClientClientStreamCall<TRequest>> await_resume() {
-      if (m_promise->cancelled) {
-        return std::nullopt;
-      }
-      return ClientClientStreamCall<TRequest>(m_executor, std::move(m_writer));
-    }
-
-  private:
-    Coroutine::promise_type* m_promise = nullptr;
-    const ClientExecutor& m_executor;
     std::unique_ptr<grpc::ClientAsyncWriter<TRequest>> m_writer;
   };
 
@@ -210,58 +175,29 @@ namespace async_grpc {
   // Server Stream
 
   template<typename TStub, typename TRequest, typename TResponse>
-  using TPrepareServerStreamFunc = std::unique_ptr<grpc::ClientAsyncReader<TResponse>>(TStub::*)(grpc::ClientContext*, const TRequest&, grpc::CompletionQueue*);
+  using TPrepareServerStreamFunc = std::unique_ptr<grpc::ClientAsyncReader<TResponse>>(TStub::*)(grpc::ClientContext*, const TRequest&, grpc::CompletionQueue*, void*);
 
   template<typename TResponse>
-  class [[nodiscard]] ClientServerStreamCall : public ClientCall {
+  class [[nodiscard]] ClientServerStreamCall {
   public:
 
-    ClientServerStreamCall(const ClientExecutor& executor, std::unique_ptr<grpc::ClientAsyncReader<TResponse>> reader)
-      : ClientCall(executor)
-      , m_reader(std::move(reader))
+    ClientServerStreamCall(std::unique_ptr<grpc::ClientAsyncReader<TResponse>> reader)
+      : m_reader(std::move(reader))
     {}
 
     auto Read(TResponse& response) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_reader->Read(&response, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_reader->Read(&response, data.tag);
       });
     }
 
     auto Finish(grpc::Status& status) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_reader->Finish(&status, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_reader->Finish(&status, data.tag);
       });
     }
 
   private:
-    std::unique_ptr<grpc::ClientAsyncReader<TResponse>> m_reader;
-  };
-
-  template<typename TResponse>
-  class [[nodiscard]] ClientServerStreamAwaitable {
-  public:
-    ClientServerStreamAwaitable(const ClientExecutor& executor, std::unique_ptr<grpc::ClientAsyncReader<TResponse>> reader)
-      : m_executor(executor)
-      , m_reader(std::move(reader))
-    {}
-
-    bool await_ready() { return false; }
-    
-    void await_suspend(std::coroutine_handle<Coroutine::promise_type> h) {
-      m_promise = &h.promise();
-      m_reader->StartCall(h.address());
-    }
-    
-    std::optional<ClientServerStreamCall<TResponse>> await_resume() {
-      if (m_promise->cancelled) {
-        return std::nullopt;
-      }
-      return ClientServerStreamCall<TResponse>(m_executor, std::move(m_reader));
-    }
-
-  private:
-    const ClientExecutor& m_executor;
-    Coroutine::promise_type* m_promise = nullptr;
     std::unique_ptr<grpc::ClientAsyncReader<TResponse>> m_reader;
   };
 
@@ -270,44 +206,43 @@ namespace async_grpc {
   // Bidirectional Stream
 
   template<typename TStub, typename TRequest, typename TResponse>
-  using TPrepareBidirectionalStreamFunc = std::unique_ptr<grpc::ClientAsyncReaderWriter<TRequest, TResponse>>(TStub::*)(grpc::ClientContext*, grpc::CompletionQueue*);
+  using TPrepareBidirectionalStreamFunc = std::unique_ptr<grpc::ClientAsyncReaderWriter<TRequest, TResponse>>(TStub::*)(grpc::ClientContext*, grpc::CompletionQueue*, void*);
 
   template<typename TRequest, typename TResponse>
-  class [[nodiscard]] ClientBidirectionalStreamCall : public ClientCall {
+  class [[nodiscard]] ClientBidirectionalStreamCall {
   public:
 
-    ClientBidirectionalStreamCall(const ClientExecutor& executor, std::unique_ptr<grpc::ClientAsyncReaderWriter<TRequest, TResponse>> readerWriter)
-      : ClientCall(executor)
-      , m_readerWriter(std::move(readerWriter))
+    ClientBidirectionalStreamCall(std::unique_ptr<grpc::ClientAsyncReaderWriter<TRequest, TResponse>> readerWriter)
+      : m_readerWriter(std::move(readerWriter))
     {}
 
     auto Read(TResponse& response) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_readerWriter->Read(&response, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_readerWriter->Read(&response, data.tag);
       });
     }
 
     auto Write(const TRequest& msg) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_readerWriter->Write(msg, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_readerWriter->Write(msg, data.tag);
       });
     }
 
     auto Write(const TRequest& msg, grpc::WriteOptions options) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_readerWriter->Write(msg, options, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_readerWriter->Write(msg, options, data.tag);
       });
     }
 
     auto WritesDone() {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_readerWriter->WritesDone(tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_readerWriter->WritesDone(data.tag);
       });
     }
 
     auto Finish(grpc::Status& status) {
-      return Awaitable([&](grpc::CompletionQueue*, void* tag) {
-        m_readerWriter->Finish(&status, tag);
+      return CompletionQueueAwaitable([&](const AwaitData& data) {
+        m_readerWriter->Finish(&status, data.tag);
       });
     }
 
@@ -315,37 +250,10 @@ namespace async_grpc {
     std::unique_ptr<grpc::ClientAsyncReaderWriter<TRequest, TResponse>> m_readerWriter;
   };
 
-  template<typename TRequest, typename TResponse>
-  class [[nodiscard]] ClientBidirectionalStreamAwaitable {
-  public:
-    ClientBidirectionalStreamAwaitable(const ClientExecutor& executor, std::unique_ptr<grpc::ClientAsyncReaderWriter<TRequest, TResponse>> reader)
-      : m_executor(executor)
-      , m_readerWriter(std::move(reader))
-    {}
-
-    bool await_ready() { return false; }
-
-    void await_suspend(std::coroutine_handle<Coroutine::promise_type> h) {
-      m_promise = &h.promise();
-      m_readerWriter->StartCall(h.address());
-    }
-
-    std::optional<ClientBidirectionalStreamCall<TRequest, TResponse>> await_resume() {
-      if (m_promise->cancelled) {
-        return std::nullopt;
-      }
-      return ClientBidirectionalStreamCall<TRequest, TResponse>(m_executor, std::move(m_readerWriter));
-    }
-
-  private:
-    const ClientExecutor& m_executor;
-    Coroutine::promise_type* m_promise = nullptr;
-    std::unique_ptr<grpc::ClientAsyncReaderWriter<TRequest, TResponse>> m_readerWriter;
-  };
 
   // ~Bidirectional Stream
 
-#define ASYNC_GRPC_CLIENT_PREPARE_FUNC(client, rpc) &client::Service::Stub::PrepareAsync ## rpc
+#define ASYNC_GRPC_CLIENT_PREPARE_FUNC(client, rpc) &client::Service::Stub::Async ## rpc
 
   template<ServiceConcept TService>
   class Client {
@@ -386,18 +294,24 @@ namespace async_grpc {
     }
 
     template<typename TRequest, typename TResponse>
-    auto CallClientStream(TPrepareClientStreamFunc<typename Service::Stub, TRequest, TResponse> func, const ClientExecutor& executor, grpc::ClientContext& context, TResponse& response) {
-      return ClientClientStreamAwaitable(executor, (MakeStub().*func)(&context, &response, executor.GetCq()));
+    auto CallClientStream(TPrepareClientStreamFunc<typename Service::Stub, TRequest, TResponse> func, grpc::ClientContext& context, TResponse& response) {
+      return CompletionQueueAwaitable([stub = MakeStub(), func, &context, &response](const AwaitData& data) mutable {
+        return ClientClientStreamCall((stub.*func)(&context, &response, data.cq, data.tag));
+      });
     }
 
     template<typename TRequest, typename TResponse>
-    auto CallServerStream(TPrepareServerStreamFunc<typename Service::Stub, TRequest, TResponse> func, const ClientExecutor& executor, grpc::ClientContext& context, const TRequest& request) {
-      return ClientServerStreamAwaitable(executor, (MakeStub().*func)(&context, request, executor.GetCq()));
+    auto CallServerStream(TPrepareServerStreamFunc<typename Service::Stub, TRequest, TResponse> func, grpc::ClientContext& context, const TRequest& request) {
+      return CompletionQueueAwaitable([stub = MakeStub(), func, &context, &request](const AwaitData& data) mutable {
+        return ClientServerStreamCall((stub.*func)(&context, request, data.cq, data.tag));
+      });
     }
 
     template<typename TRequest, typename TResponse>
-    auto CallBidirectionalStream(TPrepareBidirectionalStreamFunc<typename Service::Stub, TRequest, TResponse> func, const ClientExecutor& executor, grpc::ClientContext& context) {
-      return ClientBidirectionalStreamAwaitable(executor, (MakeStub().*func)(&context, executor.GetCq()));
+    auto CallBidirectionalStream(TPrepareBidirectionalStreamFunc<typename Service::Stub, TRequest, TResponse> func, grpc::ClientContext& context) {
+      return CompletionQueueAwaitable([stub = MakeStub(), func, &context](const AwaitData& data) mutable {
+        return ClientBidirectionalStreamCall((stub.*func)(&context, data.cq, data.tag));
+      });
     }
 
   protected:
