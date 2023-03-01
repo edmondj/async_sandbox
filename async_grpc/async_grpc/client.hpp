@@ -33,7 +33,7 @@ namespace async_grpc {
   template<typename T>
   concept RetryPolicyConcept = requires(T t, const grpc::Status& status) {
     { static_cast<bool>(t(status)) };
-    { [&t, &status]() -> Coroutine { co_await *t(status); } };
+    { [](T t, const grpc::Status& status) -> Coroutine { co_await *t(status); } };
   };
 
   class DefaultRetryPolicy {

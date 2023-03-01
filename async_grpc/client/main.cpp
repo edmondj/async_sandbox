@@ -37,9 +37,9 @@ public:
 private:
   async_grpc::Coroutine Noop() {
     utils::Log() << "Start";
-    co_await[this]() -> async_grpc::Coroutine {
+    co_await[]() -> async_grpc::Coroutine {
       utils::Log() << "Start sub1";
-      co_await[this]() -> async_grpc::Coroutine {
+      co_await[]() -> async_grpc::Coroutine {
         utils::Log() << "Sub2";
         co_return;
       }();
@@ -86,7 +86,7 @@ private:
     std::unique_ptr<grpc::ClientContext> context;
 
     auto retryOptions = async_grpc::RetryOptions(
-      [this, policy = async_grpc::DefaultRetryPolicy()](const grpc::Status& status) mutable {
+      [policy = async_grpc::DefaultRetryPolicy()](const grpc::Status& status) mutable {
         auto sent = policy(status);
         utils::Log() << "Got [" << status << (sent ? "] will " : "] will not ") << "retry";
         return sent;
