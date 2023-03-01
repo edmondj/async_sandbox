@@ -1,8 +1,6 @@
 #pragma once
 
 #include <atomic>
-#include <thread>
-#include <coroutine>
 #include <memory>
 #include <grpcpp/grpcpp.h>
 #include "async_grpc.hpp"
