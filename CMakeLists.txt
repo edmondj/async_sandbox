@@ -38,7 +38,7 @@ function(setup_target_compile_options t)
     target_compile_options(${t} PRIVATE "-Wextra" "-Wall" "-Werror")
   endif ()
   if (iwyu_path)
-    set_property(TARGET ${t} PROPERTY CXX_INCLUDE_WHAT_YOU_USE ${iwyu_path} -Xiwyu --no_comments -Xiwyu --error)
+    set_property(TARGET ${t} PROPERTY CXX_INCLUDE_WHAT_YOU_USE ${iwyu_path})
   endif ()
 endfunction()
 
