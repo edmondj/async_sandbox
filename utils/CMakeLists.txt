@@ -1,6 +1,7 @@
 add_library(utils
   logs.hpp
   logs.cpp
+  expected.hpp
 )
 setup_target_compile_options(utils)
 

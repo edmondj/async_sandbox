@@ -253,7 +253,7 @@ namespace async_grpc {
 
   // ~Bidirectional Stream
 
-#define ASYNC_GRPC_CLIENT_PREPARE_FUNC(client, rpc) &client::Service::Stub::Async ## rpc
+#define ASYNC_GRPC_CLIENT_PREPARE_FUNC(service, rpc) &service::Stub::Async ## rpc
 
   template<ServiceConcept TService>
   class Client {

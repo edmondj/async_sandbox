@@ -203,8 +203,6 @@ namespace async_grpc {
     }
   };
 
-  struct Empty {};
-
   // Only use for awaitable that will enque something in the completion queue
   template<std::invocable<const AwaitData&> TFunc>
   class [[nodiscard]] CompletionQueueAwaitable {
@@ -245,7 +243,7 @@ namespace async_grpc {
 
     TFunc m_func;
     Coroutine::promise_type* m_promise = nullptr;
-    [[no_unique_address]] std::conditional_t<std::is_void_v<ResultType>, Empty, std::optional<ResultType>> m_result = {};
+    [[no_unique_address]] std::conditional_t<std::is_void_v<ResultType>, std::monostate, std::optional<ResultType>> m_result = {};
   };
 
   bool CompletionQueueTick(grpc::CompletionQueue* cq);

@@ -11,7 +11,6 @@ class Program {
 public:
   Program(const std::shared_ptr<grpc::Channel>& channel)
     : m_echo(channel)
-    , m_variable(channel)
   {
 #define ADD_HANDLER(command) m_handlers.insert_or_assign(#command, &Program::command)
     ADD_HANDLER(Noop);
@@ -59,7 +58,7 @@ private:
         grpc::Status status;
         grpc::ClientContext context;
         utils::Log() << "Sending [" << request.ShortDebugString() << ']';
-        if (co_await m_echo.CallUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, UnaryEcho), context, request, response, status)) {
+        if (co_await m_echo.CallUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(echo_service::EchoService, UnaryEcho), context, request, response, status)) {
           auto out = utils::Log() << "Received [" << status << ']';
           if (status.ok()) {
             out << " [" << response.ShortDebugString() << ']';
@@ -94,7 +93,7 @@ private:
     );
 
     utils::Log() << "Sending [" << request.ShortDebugString() << ']';
-    if (co_await m_echo.AutoRetryUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, UnaryEcho), context, request, response, status, retryOptions)) {
+    if (co_await m_echo.AutoRetryUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(echo_service::EchoService, UnaryEcho), context, request, response, status, retryOptions)) {
       auto out = utils::Log() << "Received [" << status << ']';
       if (status.ok()) {
         out << " [" << response.ShortDebugString() << ']';
@@ -110,7 +109,7 @@ private:
     utils::Log() << "Start";
     echo_service::ClientStreamEchoResponse response;
     grpc::ClientContext context;
-    auto call = co_await m_echo.CallClientStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, ClientStreamEcho), context, response);
+    auto call = co_await m_echo.CallClientStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(echo_service::EchoService, ClientStreamEcho), context, response);
     if (!call) {
       utils::Log() << "Cancelled";
       co_return;
@@ -150,7 +149,7 @@ private:
     request.set_delay_ms(1000);
     grpc::ClientContext context;
     utils::Log() << "Sending [" << request.ShortDebugString() << ']';
-    auto call = co_await m_echo.CallServerStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, ServerStreamEcho), context, request);
+    auto call = co_await m_echo.CallServerStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(echo_service::EchoService, ServerStreamEcho), context, request);
     if (!call) {
       utils::Log() << "Cancelled";
       co_return;
@@ -174,7 +173,7 @@ private:
   async_grpc::Coroutine BidirectionalStreamEcho() {
     utils::Log() << "Start";
     grpc::ClientContext context;
-    auto call = co_await m_echo.CallBidirectionalStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(EchoClient, BidirectionalStreamEcho), context);
+    auto call = co_await m_echo.CallBidirectionalStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(echo_service::EchoService, BidirectionalStreamEcho), context);
     if (!call) {
       utils::Log() << "Cancelled";
       co_return;
@@ -226,7 +225,6 @@ private:
   }
 
   EchoClient m_echo;
-  VariableClient m_variable;
   async_grpc::ClientExecutorThread m_executor;
   using THandler = async_grpc::Coroutine(Program::*)();
   std::map<std::string, THandler> m_handlers;

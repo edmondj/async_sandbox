@@ -44,3 +44,4 @@ endfunction()
 
 add_subdirectory("utils")
 add_subdirectory("async_grpc")
+add_subdirectory("game")
