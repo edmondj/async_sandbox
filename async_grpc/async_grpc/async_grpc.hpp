@@ -6,6 +6,7 @@
 #include <optional>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/alarm.h>
+#include <variant>
 
 std::ostream& operator<<(std::ostream& out, const grpc::Status& status);
 
@@ -221,7 +222,7 @@ namespace async_grpc {
       if constexpr (std::is_void_v<ResultType>) {
         m_func(data);
       } else {
-        m_result = m_func(data);
+        this->m_result = m_func(data);
       }
     }
 

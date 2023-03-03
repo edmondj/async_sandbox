@@ -16,17 +16,22 @@ namespace async_game {
 
     template<std::derived_from<async_game::PromiseBase> TPromise>
     void await_suspend(std::coroutine_handle<TPromise> h) {
-      async_grpc::Coroutine::Spawn(m_executor, [h, routine = std::move(m_routine)]() mutable -> async_grpc::Coroutine {
-        co_await std::move(routine);
-        h.promise().MarkReady();
-      }());
+      async_grpc::Coroutine::Spawn(m_executor, Launcher(h));
     }
 
-    inline void await_resume() {}
+    inline bool await_resume() { return m_ok; }
 
   private:
+
+    template<std::derived_from<async_game::PromiseBase> TPromise>
+    async_grpc::Coroutine Launcher(std::coroutine_handle<TPromise> h) {
+      m_ok = co_await std::move(m_routine);
+      h.promise().MarkReady();
+    }
+
     async_grpc::ClientExecutor& m_executor;
     async_grpc::Coroutine m_routine;
+    bool m_ok = false;
   };
 
 }

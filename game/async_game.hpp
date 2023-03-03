@@ -6,6 +6,7 @@
 #include <optional>
 #include <mutex>
 #include <vector>
+#include <variant>
 
 namespace async_game {
   class Executor;
@@ -83,7 +84,7 @@ namespace async_game {
   template<typename T>
   class TaskAwait {
   public:
-    explicit TaskAwait(Task<T>::promise_type* promise)
+    explicit TaskAwait(typename Task<T>::promise_type* promise)
       : m_promise(promise)
     {}
 
@@ -105,7 +106,7 @@ namespace async_game {
       if constexpr (!std::is_void_v<T>) {
         m_promise->resultStorage = &m_result;
       }
-      auto cur = std::coroutine_handle<Task<T>::promise_type>::from_promise(*m_promise);
+      auto cur = std::coroutine_handle<typename Task<T>::promise_type>::from_promise(*m_promise);
       cur.resume();
       return !cur.done();
     }
@@ -117,7 +118,7 @@ namespace async_game {
     }
 
   private:
-    Task<T>::promise_type* m_promise;
+    typename Task<T>::promise_type* m_promise;
     [[no_unique_address]] std::conditional_t<std::is_void_v<T>, std::monostate, std::optional<T>> m_result;
   };
 
@@ -133,14 +134,10 @@ namespace async_game {
 
     void MarkReady(const Job& job);
 
-    template<typename TFunc>
-      requires std::invocable<TFunc>&& std::same_as<std::invoke_result_t<TFunc>, Coroutine>
-    void Spawn(TFunc&& func) {
-      Coroutine coroutine = std::forward<TFunc>(func)();
-      Coroutine::promise_type* promise = std::exchange(coroutine.promise, nullptr);
-      promise->executor = this;
-      MarkReady({ std::coroutine_handle<Coroutine::promise_type>::from_promise(*promise), promise });
-    }
+    template<std::invocable<> TFunc>
+    void Spawn(TFunc&& func) { Spawn([](TFunc func) -> Coroutine { co_await func(); }(std::forward<TFunc>(func))); }
+
+    void Spawn(Coroutine&& coroutine);
 
     void Update();
 

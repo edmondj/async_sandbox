@@ -4,6 +4,7 @@
 #include <utils/logs.hpp>
 #include <utils/expected.hpp>
 #include <protos/echo_service.grpc.pb.h>
+#include "character_service_grpc.hpp"
 
 std::string GrpcStatusToString(const grpc::Status& status) {
   std::ostringstream oss;
@@ -15,10 +16,23 @@ int main() {
   async_game::Executor executor;
   async_grpc::ClientExecutorThread grpcExecutor;
   async_grpc::Client<echo_service::EchoService> echo(grpc::CreateChannel("[::1]:4213", grpc::InsecureChannelCredentials()));
-  bool done = false;
 
   utils::Log() << "Queing work";
+
+  executor.Spawn([]() -> async_game::Coroutine {
+    CharacterServiceGrpc c;
+    utils::Log() << "Asking all players";
+    auto res = co_await c.GetAllPlayers();
+    if (!res) {
+      utils::Log() << "Failed";
+    }
+    else {
+      utils::Log() << "Found " << res->size() << " players";
+    }
+  });
+
   executor.Spawn([&]() -> async_game::Coroutine {
+    utils::Log() << "Beginning";
     auto sendEcho = [&grpcExecutor, &echo](std::string_view message) -> async_game::Task<utils::expected<std::string, std::string>> {
       utils::Log() << "Inside task";
       echo_service::UnaryEchoRequest request;
@@ -40,7 +54,8 @@ int main() {
     utils::Log() << "Task done";
     if (res) {
       utils::Log() << "Success! Got: [" << *res << ']';
-    } else {
+    }
+    else {
       utils::Log() << "Failed with error [" << res.error() << ']';
     }
 
@@ -56,26 +71,12 @@ int main() {
     }
 
     utils::Log() << "Task done";
-    done = true;
   });
-  //executor.Spawn([&]() -> async_game::Coroutine {
-  //  utils::Log() << "Inside coroutine";
-  //  echo_service::UnaryEchoRequest request;
-  //  request.set_message("Hello!");
-  //  grpc::ClientContext context;
-  //  echo_service::UnaryEchoResponse response;
-  //  grpc::Status status;
-  //  utils::Log() << "Starting Echo";
-  //  co_await GrpcCoroutine(grpcExecutor.GetExecutor(), echo.CallUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(echo_service::EchoService, UnaryEcho), context, request, response, status));
-  //  utils::Log() << "Echo finished [" << status << "] [" << response.ShortDebugString() << ']';
-  //  done = true;
-  //});
+
   utils::Log() << "Update loop";
-  while (!done) {
+  while (true) {
     executor.Update();
-    if (!done) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
   utils::Log() << "Game over";
 }

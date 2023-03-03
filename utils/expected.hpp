@@ -63,6 +63,9 @@ namespace utils {
     const TrueT&& operator*() const&& { return std::get<0>(m_value); }
     TrueT&& operator*()&& { return std::get<0>(m_value); }
 
+    const TrueT* operator->() const { return &std::get<0>(m_value); }
+    TrueT* operator->() { return &std::get<0>(m_value); }
+
     const E& error() const& { return std::get<1>(m_value); }
     E& error()& { return std::get<1>(m_value); }
     const E&& error() const&& { return std::get<1>(m_value); }

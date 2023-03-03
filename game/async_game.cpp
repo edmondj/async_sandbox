@@ -7,6 +7,12 @@ namespace async_game {
     m_ready.push_back(job);
   }
 
+  void Executor::Spawn(Coroutine&& coroutine) {
+      Coroutine::promise_type* promise = std::exchange(coroutine.promise, nullptr);
+      promise->executor = this;
+      MarkReady({ std::coroutine_handle<Coroutine::promise_type>::from_promise(*promise), promise });
+  }
+
   void Executor::Update() {
     while (true) {
       std::vector<Job> ready;
