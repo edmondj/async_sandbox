@@ -1,56 +1,44 @@
-#include <coroutine>
 #include "async_grpc.hpp"
-#include <iostream>
-
-std::ostream& operator<<(std::ostream& out, const grpc::Status& status) {
-  out << async_grpc::StatusCodeString(status.error_code());
-  if (!status.ok()) {
-    out << ':' << status.error_message();
-  }
-  return out;
-}
 
 namespace async_grpc {
-  
-  const char* StatusCodeString(grpc::StatusCode code) {
-    switch (code) {
-    case grpc::StatusCode::OK: return "OK";
-    case grpc::StatusCode::CANCELLED: return "CANCELLED";
-    case grpc::StatusCode::UNKNOWN: return "UNKNOWN";
-    case grpc::StatusCode::INVALID_ARGUMENT: return "INVALID_ARGUMENT";
-    case grpc::StatusCode::DEADLINE_EXCEEDED: return "DEADLINE_EXCEEDED";
-    case grpc::StatusCode::NOT_FOUND: return "NOT_FOUND";
-    case grpc::StatusCode::ALREADY_EXISTS: return "ALREADY_EXISTS";
-    case grpc::StatusCode::PERMISSION_DENIED: return "PERMISSION_DENIED";
-    case grpc::StatusCode::UNAUTHENTICATED: return "UNAUTHENTICATED";
-    case grpc::StatusCode::RESOURCE_EXHAUSTED: return "RESOURCE_EXHAUSTED";
-    case grpc::StatusCode::FAILED_PRECONDITION: return "FAILED_PRECONDITION";
-    case grpc::StatusCode::ABORTED: return "ABORTED";
-    case grpc::StatusCode::OUT_OF_RANGE: return "OUT_OF_RANGE";
-    case grpc::StatusCode::UNIMPLEMENTED: return "UNIMPLEMENTED";
-    case grpc::StatusCode::INTERNAL: return "INTERNAL";
-    case grpc::StatusCode::UNAVAILABLE: return "UNAVAILABLE";
-    case grpc::StatusCode::DATA_LOSS: return "DATA_LOSS";
-    default: return "UNKNOWN";
-    }
+
+  CompletionQueueExecutor::CompletionQueueExecutor()
+    : m_cq(std::make_unique<grpc::CompletionQueue>())
+  {}
+
+  CompletionQueueExecutor::CompletionQueueExecutor(std::unique_ptr<grpc::CompletionQueue> cq) noexcept
+    : m_cq(std::move(cq))
+  {}
+
+  CompletionQueueExecutor::~CompletionQueueExecutor() {
+    Shutdown();
   }
-  
-  bool CompletionQueueTick(grpc::CompletionQueue* cq)
+
+  grpc::CompletionQueue* CompletionQueueExecutor::GetCq()
   {
-    void* tag = nullptr;
+    return m_cq.get();
+  }
+
+  bool Tick(grpc::CompletionQueue* cq)
+  {
     bool ok = false;
+    void* tag = nullptr;
     if (!cq->Next(&tag, &ok)) {
       return false;
     }
-    auto h = std::coroutine_handle<Coroutine::promise_type>::from_address(tag);
-    h.promise().cancelled = !ok;
-    Coroutine::Resume(h);
+    auto* job = reinterpret_cast<SuspendedJob*>(tag);
+    job->ok = ok;
+    assert(job->job);
+    async_lib::Resume(job->job);
     return true;
   }
 
-  void CompletionQueueShutdown(grpc::CompletionQueue* cq)
+  void CompletionQueueExecutor::Shutdown()
   {
-    cq->Shutdown();
+    m_cq->Shutdown();
   }
 
+  void CompletionQueueExecutor::Spawn(const Job& job) {
+    async_lib::Resume(job);
+  }
 }

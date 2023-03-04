@@ -1,269 +1,132 @@
 #pragma once
 
 #include <thread>
-#include <concepts>
-#include <coroutine>
-#include <optional>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/alarm.h>
-#include <variant>
+#include <async_lib/async_lib.hpp>
 
-std::ostream& operator<<(std::ostream& out, const grpc::Status& status);
-
+#include <iostream>
 namespace async_grpc {
-
-  const char* StatusCodeString(grpc::StatusCode code);
-
-  class Coroutine;
-
-  template<typename T>
-  concept ExecutorConcept = std::move_constructible<T> && requires(const T executor, Coroutine&& coro) {
-    { executor.GetCq() } -> std::same_as<grpc::CompletionQueue*>;
-  };
-
+  
   template<typename T>
   concept ServiceConcept = std::derived_from<typename T::AsyncService, grpc::Service>&& requires {
     typename T::Stub;
   };
 
-  // Must be either co_await'ed or given to Spawn
-  class [[nodiscard]] Coroutine {
+  class CompletionQueueExecutor;
+
+  template<typename T = void>
+  using Task = async_lib::Task<CompletionQueueExecutor, T>;
+
+  class CompletionQueueExecutor;
+  using Job = async_lib::Job<CompletionQueueExecutor>;
+  using PromiseBase = async_lib::PromiseBase<CompletionQueueExecutor>;
+
+  class CompletionQueueExecutor {
   public:
-    enum class Status {
-      Unstarted,
-      Suspended,
-      Cancelled,
-      Done
-    };
 
-    struct promise_type {
-      inline Coroutine get_return_object() { return Coroutine(this); }
-      inline std::suspend_always initial_suspend() noexcept { return {}; };
-      inline std::suspend_always final_suspend() noexcept { return {}; };
-      void return_void() {}
-      void unhandled_exception() {}
+    CompletionQueueExecutor();
+    CompletionQueueExecutor(std::unique_ptr<grpc::CompletionQueue> cq) noexcept;
 
-      grpc::CompletionQueue* completionQueue = nullptr;
-      std::coroutine_handle<promise_type> parent;
-      bool cancelled = false;
-      Status* statusStorage = nullptr;
+    CompletionQueueExecutor(CompletionQueueExecutor&&) = default;
+    CompletionQueueExecutor& operator=(CompletionQueueExecutor&&) = default;
 
-      Coroutine await_transform(Coroutine&& child) {
-        child.m_promise->completionQueue = completionQueue;
-        if (child.m_status == Status::Unstarted) {
-          Resume(std::coroutine_handle<promise_type>::from_promise(*child.m_promise));
-        }
-        if (child.m_status == Status::Suspended) {
-          child.m_promise->parent = std::coroutine_handle<promise_type>::from_promise(*this);
-        }
-        else {
-          child.m_promise = nullptr;
-        }
-        return std::move(child);
-      }
+    ~CompletionQueueExecutor();
 
-      void await_transform(Coroutine&) = delete;
-      void await_transform(const Coroutine&) = delete;
-      void await_transform(const Coroutine&&) = delete;
+    grpc::CompletionQueue* GetCq();
 
-      template<typename TAwaitable>
-      decltype(auto) await_transform(TAwaitable&& t) {
-        return std::forward<TAwaitable>(t);
-      }
-    };
+    void Shutdown();
 
-    // Ctor only used from promise_type::get_return_object
-    inline explicit Coroutine(promise_type* promise)
-      : m_promise(promise)
-    {
-      m_promise->statusStorage = &m_status;
-    }
-
-    Coroutine() = default;
-    Coroutine(Coroutine&& other) noexcept
-      : m_promise(std::exchange(other.m_promise, nullptr))
-      , m_status(std::exchange(other.m_status, Status::Unstarted))
-    {
-      if (m_promise) {
-        m_promise->statusStorage = &m_status;
-      }
-    }
-
-    Coroutine& operator=(Coroutine&& other) noexcept {
-      assert(!m_promise);
-      assert(m_status != Status::Suspended);
-
-      m_promise = std::exchange(other.m_promise, nullptr);
-      m_status = std::exchange(other.m_status, Status::Unstarted);
-      if (m_promise) {
-        m_promise->statusStorage = &m_status;
-      }
-      return *this;
-    }
-
-    ~Coroutine() {
-      assert(!m_promise);
-    }
-
-    explicit operator bool() const { return m_promise; }
-
-    inline bool await_ready() { return m_status != Status::Suspended; }
-    inline void await_suspend(std::coroutine_handle<promise_type> parent) {
-      assert(m_promise);
-      m_promise->parent = parent;
-      m_promise = nullptr;
-    }
-    inline bool await_resume() { return m_status == Status::Done; }
-
-    static Status GetStatus(std::coroutine_handle<promise_type> h) {
-      assert(h);
-      if (h.done()) {
-        if (h.promise().cancelled) {
-          return Status::Cancelled;
-        }
-        return Status::Done;
-      }
-      return Status::Suspended;
-    }
-
-    static void Resume(std::coroutine_handle<promise_type> h) {
-      h.resume();
-      Status res = GetStatus(h);
-      if (h.promise().statusStorage) {
-        *h.promise().statusStorage = res;
-      }
-      if (res != Status::Suspended) {
-        std::coroutine_handle<promise_type> parent = h.promise().parent;
-        bool cancelled = h.promise().cancelled;
-        h.destroy();
-        if (parent) {
-          parent.promise().cancelled = cancelled;
-          Resume(parent);
-        }
-      }
-    }
-
-    template<ExecutorConcept TExecutor>
-    static void Spawn(TExecutor& executor, Coroutine&& coroutine) {
-      promise_type* promise = std::exchange(coroutine.m_promise, nullptr);
-      coroutine.m_status = Status::Done;
-      promise->statusStorage = nullptr;
-      promise->completionQueue = executor.GetCq();
-      auto h = std::coroutine_handle<promise_type>::from_promise(*promise);
-      Resume(h);
-    }
-
-    // Start a subroutine on the same executor as the current coroutine
-    // Needs to be immediately co_await'ed
-    // The subroutine will run start running immediatly
-    struct [[nodiscard]] StartSubroutine {
-      StartSubroutine(Coroutine&& coro)
-        : m_promise(std::exchange(coro.m_promise, nullptr))
-      {
-        assert(m_promise);
-        coro.m_status = Status::Done;
-        m_promise->statusStorage = &m_status;
-      }
-
-      bool await_ready() { return false; }
-      bool await_suspend(std::coroutine_handle<promise_type> cur) {
-        m_promise->completionQueue = cur.promise().completionQueue;
-        Coroutine::Resume(std::coroutine_handle<promise_type>::from_promise(*m_promise));
-        return false; // always return to caller
-      }
-
-      Coroutine await_resume() {
-        if (m_status == Status::Suspended) {
-          return Coroutine(m_promise);
-        }
-        return Coroutine();
-      }
-
-    private:
-      promise_type* m_promise;
-      Status m_status = Status::Unstarted;
-    };
+    void Spawn(const Job& job);
 
   private:
-    Coroutine(const Coroutine&) = delete;
-    Coroutine& operator=(const Coroutine&) = delete;
+    std::unique_ptr<grpc::CompletionQueue> m_cq;
+  };
 
-    promise_type* m_promise = nullptr;
-    Status m_status = Status::Unstarted;
+  bool Tick(grpc::CompletionQueue* cq);
+
+  template<std::derived_from<CompletionQueueExecutor> TExecutor>
+  class ExecutorThread {
+  public:
+    template<typename... TArgs>
+    ExecutorThread(TArgs&&... args)
+      : m_executor(std::forward<TArgs>(args)...)
+      , m_thread([cq = m_executor.GetCq()]() { while (Tick(cq)); })
+    {}
+
+    ExecutorThread(ExecutorThread&&) = default;
+    ExecutorThread& operator=(ExecutorThread&&) = default;
+
+    ~ExecutorThread() {
+      Shutdown();
+    }
+
+    TExecutor& GetExecutor() { return m_executor; }
+    void Shutdown() { m_executor.Shutdown(); }
+
+  private:
+    TExecutor m_executor;
+    std::jthread m_thread;
+  };
+
+  struct ClientExecutorThread : public ExecutorThread<CompletionQueueExecutor> {
+    ClientExecutorThread() = default;
+  };
+
+  struct SuspendedJob {
+    Job job;
+    bool ok = false;
   };
 
   struct AwaitData {
     grpc::CompletionQueue* cq;
     void* tag;
-
-    static inline AwaitData FromHandle(std::coroutine_handle<Coroutine::promise_type> h) {
-      return {
-        .cq = h.promise().completionQueue,
-        .tag = h.address()
-      };
-    }
   };
 
-  // Only use for awaitable that will enque something in the completion queue
   template<std::invocable<const AwaitData&> TFunc>
-  class [[nodiscard]] CompletionQueueAwaitable {
+  class CompletionQueueAwaitable {
   public:
+    using ReturnType = std::invoke_result_t<TFunc, const AwaitData&>;
+
     explicit CompletionQueueAwaitable(TFunc func)
       : m_func(std::move(func))
     {}
 
-    bool await_ready() {
-      return false;
-    }
+    bool await_ready() { return false; }
 
-    void await_suspend(std::coroutine_handle<Coroutine::promise_type> h) {
-      m_promise = &h.promise();
-      auto data = AwaitData::FromHandle(h);
-      if constexpr (std::is_void_v<ResultType>) {
+    template<std::derived_from<PromiseBase> TPromise>
+    void await_suspend(std::coroutine_handle<TPromise> handle) {
+      m_suspended = true;
+      m_job.job = Job(handle);
+      auto data = AwaitData{ m_job.job.promise->executor->GetCq(), &m_job };
+      if constexpr (std::is_void_v<ReturnType>) {
         m_func(data);
       } else {
-        this->m_result = m_func(data);
+        m_result = m_func(data);
       }
     }
 
     auto await_resume() {
-      bool ok = !m_promise->cancelled;
-      if constexpr (std::is_void_v<ResultType>) {
-        return ok;
+      m_suspended = false;
+      if constexpr (std::is_void_v<ReturnType>) {
+        return m_job.ok;
       } else {
-        if (ok) {
+        if (m_job.ok) {
           return std::move(m_result);
-        } else {
-          return std::optional<ResultType>{};
         }
+        return std::optional<ReturnType>();
       }
     }
 
+    ~CompletionQueueAwaitable() {
+      assert(!m_suspended);
+    }
+
   private:
-    using ResultType = std::invoke_result_t<TFunc, const AwaitData&>;
-
     TFunc m_func;
-    Coroutine::promise_type* m_promise = nullptr;
-    [[no_unique_address]] std::conditional_t<std::is_void_v<ResultType>, std::monostate, std::optional<ResultType>> m_result = {};
-  };
-
-  bool CompletionQueueTick(grpc::CompletionQueue* cq);
-  void CompletionQueueShutdown(grpc::CompletionQueue* cq);
-
-  template<ExecutorConcept TExecutor>
-  class Executor : public TExecutor {
-  public:
-    Executor(TExecutor executor)
-      : TExecutor(std::move(executor))
-    {}
-
-    bool Poll() {
-      return CompletionQueueTick(this->GetCq());
-    }
-
-    void Shutdown() {
-      this->GetCq()->Shutdown();
-    }
+    SuspendedJob m_job;
+    bool m_suspended = false;
+    [[no_unique_address]] std::conditional_t<std::is_void_v<ReturnType>, std::monostate, std::optional<ReturnType>> m_result;
   };
 
   template<typename T>
@@ -283,8 +146,12 @@ namespace async_grpc {
     Alarm(Alarm&&) = default;
     Alarm& operator=(Alarm&&) = default;
 
+    void SetDeadline(TDeadline deadline) {
+      m_deadline = deadline;
+    }
+
     auto Start() {
-      return CompletionQueueAwaitable([&](const AwaitData& data) {
+      return CompletionQueueAwaitable([this](const AwaitData& data) {
         m_alarm.Set(data.cq, m_deadline, data.tag);
       });
     }
@@ -300,36 +167,4 @@ namespace async_grpc {
     grpc::Alarm m_alarm;
   };
 
-  // A thread running an executor Poll loop
-  template<ExecutorConcept TExecutor>
-  class ExecutorThread {
-  public:
-    explicit ExecutorThread(TExecutor executor = {})
-      : m_executor(std::move(executor))
-      , m_thread([cq = m_executor.GetCq()]() { while (CompletionQueueTick(cq)); })
-    {}
-
-    ExecutorThread(ExecutorThread&& other) = default;
-    ExecutorThread& operator=(ExecutorThread&&) = default;
-    
-    ~ExecutorThread() {
-      Shutdown();
-    }
-
-    void Shutdown() {
-      CompletionQueueShutdown(m_executor.GetCq());
-    }
-
-    TExecutor& GetExecutor() {
-      return m_executor;
-    }
-
-    void Spawn(Coroutine&& coroutine) {
-      Coroutine::Spawn(m_executor, std::move(coroutine));
-    }
-
-  private:
-    TExecutor m_executor;
-    std::jthread m_thread;
-  };
 }

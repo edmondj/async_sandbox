@@ -1,7 +1,7 @@
 add_executable(game
   async_game.cpp
   async_game.hpp
-  grpc_game.hpp
+  
   character_service.hpp
   character_service_grpc.hpp
   character_service_grpc.cpp

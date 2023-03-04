@@ -1,17 +1,14 @@
 #include "server.hpp"
 
 namespace async_grpc {
-  
-  ServerExecutor::ServerExecutor(std::unique_ptr<grpc::ServerCompletionQueue> cq)
-    : m_cq(std::move(cq))
+
+  ServerExecutor::ServerExecutor(std::unique_ptr<grpc::ServerCompletionQueue> notifCq) noexcept
+    : CompletionQueueExecutor(std::move(notifCq))
   {}
 
-  grpc::CompletionQueue* ServerExecutor::GetCq() const {
-    return m_cq.get();
-  }
-
-  grpc::ServerCompletionQueue* ServerExecutor::GetNotifCq() const {
-    return m_cq.get();
+  grpc::ServerCompletionQueue* ServerExecutor::GetNotifCq()
+  {
+    return static_cast<grpc::ServerCompletionQueue*>(GetCq());
   }
 
   Server::Server(ServerOptions&& options)
@@ -25,7 +22,7 @@ namespace async_grpc {
     }
     m_executors.reserve(options.executorCount);
     for (size_t i = 0; i < options.executorCount; ++i) {
-      m_executors.emplace_back(ServerExecutor(builder.AddCompletionQueue()));
+      m_executors.emplace_back(builder.AddCompletionQueue());
     }
     if (options.options) {
       builder.SetOption(std::move(options.options));
@@ -44,11 +41,6 @@ namespace async_grpc {
   void Server::Shutdown()
   {
     m_server->Shutdown();
-  }
-
-  void Server::Spawn(Coroutine&& coroutine)
-  {
-    Coroutine::Spawn(SelectNextExecutor(), std::move(coroutine));
   }
 
   ServerExecutor& Server::SelectNextExecutor()

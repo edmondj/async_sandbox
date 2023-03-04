@@ -1,5 +1,6 @@
 #include <iostream>
 #include <async_grpc/client.hpp>
+#include <async_grpc/iostream.hpp>
 #include <protos/echo_service.grpc.pb.h>
 #include <protos/variable_service.grpc.pb.h>
 #include <utils/logs.hpp>
@@ -25,7 +26,7 @@ public:
   void Process(std::string_view line) {
     for (const auto& [name, handler] : m_handlers) {
       if (line.starts_with(name)) {
-        m_executor.Spawn((this->*handler)());
+        async_lib::Spawn(m_executor.GetExecutor(), (this->*handler)());
         return;
       }
     }
@@ -33,24 +34,23 @@ public:
   }
 
 private:
-  async_grpc::Coroutine Noop() {
+  async_grpc::Task<> Noop() {
     utils::Log() << "Start";
-    co_await[]() -> async_grpc::Coroutine {
+    utils::Log() << "End " << co_await[]() -> async_grpc::Task<std::string> {
       utils::Log() << "Start sub1";
-      co_await[]() -> async_grpc::Coroutine {
+      utils::Log() << "End " << co_await[]() -> async_grpc::Task<std::string> {
         utils::Log() << "Sub2";
-        co_return;
+        co_return "sub2";
       }();
-      utils::Log() << "End sub1";
+      co_return "sub1";
     }();
-    utils::Log() << "End";
   }
 
-  async_grpc::Coroutine NestedEcho() {
+  async_grpc::Task<> NestedEcho() {
     utils::Log() << "Start";
-    co_await[this]() -> async_grpc::Coroutine {
+    co_await[this]() -> async_grpc::Task<> {
       utils::Log() << "Start sub1";
-      co_await[this]() -> async_grpc::Coroutine {
+      co_await[this]() -> async_grpc::Task<> {
         utils::Log() << "Start sub2";
         echo_service::UnaryEchoRequest request;
         request.set_message("hello");
@@ -74,7 +74,7 @@ private:
     utils::Log() << "End";
   }
 
-  async_grpc::Coroutine UnaryEcho() {
+  async_grpc::Task<> UnaryEcho() {
     utils::Log() << "Start";
     echo_service::UnaryEchoRequest request;
     request.set_message("hello");
@@ -105,7 +105,7 @@ private:
     utils::Log() << "End";
   }
 
-  async_grpc::Coroutine ClientStreamEcho() {
+  async_grpc::Task<> ClientStreamEcho() {
     utils::Log() << "Start";
     echo_service::ClientStreamEchoResponse response;
     grpc::ClientContext context;
@@ -141,7 +141,7 @@ private:
     utils::Log() << "End";
   }
 
-  async_grpc::Coroutine ServerStreamEcho() {
+  async_grpc::Task<> ServerStreamEcho() {
     utils::Log() << "Start";
     echo_service::ServerStreamEchoRequest request;
     request.set_message("hola");
@@ -170,7 +170,7 @@ private:
     utils::Log() << "End";
   }
 
-  async_grpc::Coroutine BidirectionalStreamEcho() {
+  async_grpc::Task<> BidirectionalStreamEcho() {
     utils::Log() << "Start";
     grpc::ClientContext context;
     auto call = co_await m_echo.CallBidirectionalStream(ASYNC_GRPC_CLIENT_PREPARE_FUNC(echo_service::EchoService, BidirectionalStreamEcho), context);
@@ -179,14 +179,15 @@ private:
       co_return;
     }
     utils::Log() << "Starting read subroutine...";
-    async_grpc::Coroutine readCoroutine = co_await async_grpc::Coroutine::StartSubroutine([&]() -> async_grpc::Coroutine {
+    auto startRead = [&]() -> async_grpc::Task<> {
       utils::Log() << "Read subroutine started";
       echo_service::BidirectionalStreamEchoResponse response;
       while (co_await call->Read(response)) {
         utils::Log() << "Received [" << response.ShortDebugString() << ']';
       }
       utils::Log() << "Read subroutine done";
-    }());
+    };
+    async_grpc::Task<> readTask = co_await async_lib::StartSubroutine(startRead());
     echo_service::BidirectionalStreamEchoRequest request;
     auto* message = request.mutable_message();
     message->set_message("guten tag");
@@ -220,13 +221,13 @@ private:
     }
     utils::Log() << "Stopping subroutine";
     context.TryCancel(); // Cancel pending read
-    co_await std::move(readCoroutine);
+    co_await std::move(readTask);
     utils::Log() << "End";
   }
 
   EchoClient m_echo;
   async_grpc::ClientExecutorThread m_executor;
-  using THandler = async_grpc::Coroutine(Program::*)();
+  using THandler = async_grpc::Task<>(Program::*)();
   std::map<std::string, THandler> m_handlers;
 };
 

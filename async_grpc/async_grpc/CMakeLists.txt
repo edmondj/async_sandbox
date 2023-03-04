@@ -5,11 +5,16 @@
   client.hpp
   server.cpp
   server.hpp
-  
- "client.cpp")
+  client.cpp
+  iostream.cpp
+  iostream.hpp
+)
 
 target_link_libraries(async_grpc
-  PUBLIC libprotobuf grpc grpc++
+  PUBLIC libprotobuf grpc grpc++ async_lib
+)
+target_include_directories(async_grpc
+  PRIVATE "$<TARGET_PROPERTY:async_lib,SOURCE_DIR>/.."
 )
 setup_target_compile_options(async_grpc)
 target_compile_definitions(async_grpc

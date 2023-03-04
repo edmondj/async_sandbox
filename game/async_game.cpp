@@ -1,16 +1,13 @@
 #include "async_game.hpp"
 
 namespace async_game {
-  
+  void Executor::Spawn(const Job& job) {
+    MarkReady(job);
+  }
+
   void Executor::MarkReady(const Job& job) {
     auto lock = std::unique_lock(m_lock);
     m_ready.push_back(job);
-  }
-
-  void Executor::Spawn(Coroutine&& coroutine) {
-      Coroutine::promise_type* promise = std::exchange(coroutine.promise, nullptr);
-      promise->executor = this;
-      MarkReady({ std::coroutine_handle<Coroutine::promise_type>::from_promise(*promise), promise });
   }
 
   void Executor::Update() {
@@ -23,19 +20,8 @@ namespace async_game {
       if (ready.empty()) {
         break;
       }
-      for (Job& j : ready) {
-        Resume(j);
-      }
-    }
-  }
-
-  void Executor::Resume(Job& j) {
-    j.handle.resume();
-    if (j.handle.done()) {
-      Job next = j.promise->next;
-      j.handle.destroy();
-      if (next.handle) {
-        Resume(next);
+      for (const auto& job : ready) {
+        async_lib::Resume(job);
       }
     }
   }

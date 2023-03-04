@@ -2,15 +2,6 @@
 
 namespace async_grpc {
 
-  ClientExecutor::ClientExecutor() noexcept
-    : m_cq(std::make_unique<grpc::CompletionQueue>())
-  {}
-
-  grpc::CompletionQueue* ClientExecutor::GetCq() const
-  {
-    return m_cq.get();
-  }
-
   ChannelProvider::ChannelProvider(std::shared_ptr<grpc::Channel> channel) noexcept
       : m_channels(1, std::move(channel))
   {}

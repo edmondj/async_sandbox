@@ -5,18 +5,6 @@
 
 namespace async_grpc {
 
-  class ClientExecutor {
-  public:
-    ClientExecutor() noexcept;
-
-    grpc::CompletionQueue* GetCq() const;
-
-  private:
-    std::unique_ptr<grpc::CompletionQueue> m_cq;
-  };
-
-  using ClientExecutorThread = ExecutorThread<ClientExecutor>;
-
   class ChannelProvider {
   public:
     ChannelProvider(std::shared_ptr<grpc::Channel> channel) noexcept;
@@ -33,7 +21,7 @@ namespace async_grpc {
   template<typename T>
   concept RetryPolicyConcept = requires(T t, const grpc::Status& status) {
     { static_cast<bool>(t(status)) };
-    { [](T t, const grpc::Status& status) -> Coroutine { co_await *t(status); } };
+    { [](T t, const grpc::Status& status) -> Task<> { co_await *t(status); } };
   };
 
   class DefaultRetryPolicy {
@@ -112,8 +100,10 @@ namespace async_grpc {
     {}
 
     bool await_ready() { return false; }
-    bool await_suspend(std::coroutine_handle<Coroutine::promise_type> h) {
-      m_reader = (m_stub.*m_func)(&m_context, m_request, AwaitData::FromHandle(h).cq);
+
+    template<std::derived_from<PromiseBase> TPromise>
+    bool await_suspend(std::coroutine_handle<TPromise> h) {
+      m_reader = (m_stub.*m_func)(&m_context, m_request, h.promise().executor->GetCq());
       return false;
     }
     ClientUnaryCall<TResponse> await_resume() {
@@ -270,25 +260,27 @@ namespace async_grpc {
     }
 
     template<typename TRequest, typename TResponse>
-    Coroutine CallUnary(TPrepareUnaryFunc<typename Service::Stub, TRequest, TResponse> func, grpc::ClientContext& context, const TRequest& request, TResponse& response, grpc::Status& status) {
+    Task<bool> CallUnary(TPrepareUnaryFunc<typename Service::Stub, TRequest, TResponse> func, grpc::ClientContext& context, const TRequest& request, TResponse& response, grpc::Status& status) {
       auto call = co_await CallUnary(func, context, request);
-      co_await call.Finish(response, status);
+      co_return co_await call.Finish(response, status);
     }
 
     template<typename TRequest, typename TResponse, RetryOptionsConcept TRetryOptions = DefaultRetryOptions>
-    Coroutine AutoRetryUnary(TPrepareUnaryFunc<typename Service::Stub, TRequest, TResponse> func, std::unique_ptr<grpc::ClientContext>& context, const TRequest& request, TResponse& response, grpc::Status& status, TRetryOptions retryOptions = {}) {
+    Task<bool> AutoRetryUnary(TPrepareUnaryFunc<typename Service::Stub, TRequest, TResponse> func, std::unique_ptr<grpc::ClientContext>& context, const TRequest& request, TResponse& response, grpc::Status& status, TRetryOptions retryOptions = {}) {
       while (true) {
         context = retryOptions.contextProvider();
         if (!co_await CallUnary(func, *context, request, response, status)) {
-          break;
+          co_return false;
         }
         if (status.ok()) {
-          break;
+          co_return true;
         }
         if (auto shouldRetry = retryOptions.retryPolicy(status); shouldRetry) {
-          co_await *shouldRetry;
+          if (!co_await *shouldRetry) {
+            co_return false;
+          }
         } else {
-          break;
+          co_return true;
         }
       }
     }
