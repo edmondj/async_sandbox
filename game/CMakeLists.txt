@@ -1,11 +1,12 @@
 add_executable(game
   async_game.cpp
   async_game.hpp
-  
   character_service.hpp
   character_service_grpc.hpp
   character_service_grpc.cpp
   main.cpp
+  character_service_memory.hpp
+  character_service_memory.cpp
 )
 target_link_libraries(game
   PRIVATE async_grpc protos utils

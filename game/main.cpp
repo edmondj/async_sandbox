@@ -5,6 +5,7 @@
 #include <utils/expected.hpp>
 #include <protos/echo_service.grpc.pb.h>
 #include "character_service_grpc.hpp"
+#include "character_service_memory.hpp"
 
 std::string GrpcStatusToString(const grpc::Status& status) {
   std::ostringstream oss;
@@ -65,11 +66,43 @@ int main() {
     co_return;
   };
 
+  CharacterServiceGrpc service;
+
+  auto getPlayer = [&]() -> async_game::Task<> {
+    utils::Log() << "Requesting player";
+    Player p = co_await service.GetPlayer();
+    utils::Log() << "Got Player { level: " << p.level << ", xp: " << p.xp << "}";
+
+    utils::Log() << "Giving 100 xp";
+    co_await service.GiveXp(100);
+
+    utils::Log() << "Requesting player";
+    p = co_await service.GetPlayer();
+    utils::Log() << "Got Player { level: " << p.level << ", xp: " << p.xp << "}";
+
+    utils::Log() << "Leveling up";
+    co_await service.LevelUp();
+
+    utils::Log() << "Requesting player";
+    p = co_await service.GetPlayer();
+    utils::Log() << "Got Player { level: " << p.level << ", xp: " << p.xp << "}";
+
+    utils::Log() << "Resetting player";
+    co_await service.Reset();
+
+    utils::Log() << "Requesting player";
+    p = co_await service.GetPlayer();
+    utils::Log() << "Got Player { level: " << p.level << ", xp: " << p.xp << "}";
+
+    ++done;
+  };
+
   utils::Log() << "Queuing work";
   async_lib::Spawn(executor, echoTest());
+  async_lib::Spawn(executor, getPlayer());
 
   utils::Log() << "Update loop";
-  while (done < 1) {
+  while (done < 2) {
     executor.Update();
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }

@@ -3,24 +3,22 @@
 #include "async_game.hpp"
 #include <utils/expected.hpp>
 
-struct Error {
-  std::string message;
-};
-
 struct Player {
-  int64_t id;
-  int64_t level;
+  int64_t level = 1;
+  int64_t xp = 0;
 };
-
-template<typename T>
-using Result = async_game::Task<utils::expected<T, Error>>;
 
 struct CharacterService {
 
   virtual ~CharacterService() = default;
 
-  virtual Result<std::vector<Player>> GetAllPlayers() = 0;
-  virtual Result<void> LevelupPlayer(int64_t id) = 0;
-  virtual Result<Player> CreatePlayer() = 0;
-  virtual Result<void> DeletePlayer() = 0;
+  // If player doesn't exist, creates it at level 1 with 0 xp
+  virtual async_game::Task<Player> GetPlayer() = 0;
+  virtual async_game::Task<> GiveXp(int64_t ammount) = 0;
+
+  // Will reset the ammount of xp and increase the level
+  virtual async_game::Task<> LevelUp() = 0;
+
+  // Will set the player back as a level 1 with 0 xp
+  virtual async_game::Task<> Reset() = 0;
 };

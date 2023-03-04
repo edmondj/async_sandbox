@@ -63,10 +63,21 @@ namespace utils {
       return has_value();
     }
 
+    const TrueT& value() const& { return std::get<0>(m_value); }
+    TrueT& value()& { return std::get<0>(m_value); }
+    const TrueT&& value() const&& { return std::get<0>(m_value); }
+    TrueT&& value()&& { return std::get<0>(m_value); }
+
     const TrueT& operator*() const& { return std::get<0>(m_value); }
     TrueT& operator*()& { return std::get<0>(m_value); }
     const TrueT&& operator*() const&& { return std::get<0>(m_value); }
     TrueT&& operator*()&& { return std::get<0>(m_value); }
+
+    template<typename U>
+    T value_or(U&& defaultValue) const& { return has_value() ? value() : defaultValue; }
+    template<typename U>
+    T value_or(U&& defaultValue) && { return has_value() ? std::move(value()) : defaultValue; }
+
 
     const TrueT* operator->() const { return &std::get<0>(m_value); }
     TrueT* operator->() { return &std::get<0>(m_value); }
