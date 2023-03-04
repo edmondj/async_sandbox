@@ -2,6 +2,7 @@
 
 #include <variant>
 #include <type_traits>
+#include <concepts>
 
 // Basic expected implementation
 
@@ -43,10 +44,14 @@ namespace utils {
     expected(TrueT&& t)
       : m_value(std::in_place_index<0>, std::move(t))
     {}
-    expected(const unexpected<E>& e)
+
+    template<std::convertible_to<E> U>
+    expected(const unexpected<U>& e)
       : m_value(std::in_place_index<1>, e.error())
     {}
-    expected(unexpected<E>&& e)
+
+    template<std::convertible_to<E> U>
+    expected(unexpected<U>&& e)
       : m_value(std::in_place_index<1>, std::move(e).error())
     {}
 

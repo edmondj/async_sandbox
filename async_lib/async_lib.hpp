@@ -183,7 +183,7 @@ namespace async_lib {
 
 
   template<ExecutorConcept TaskExecutor, typename T>
-  class StartSubroutine {
+  class [[nodiscard]] StartSubroutine {
   public:
     using promise_type = typename Task<TaskExecutor, T>::promise_type;
 
@@ -212,5 +212,52 @@ namespace async_lib {
 
   private:
     Task<TaskExecutor, T> m_task;
+  };
+
+  template<ExecutorConcept ChildExecutor, typename T>
+  class SpawnCrossTask {
+  public:
+    explicit SpawnCrossTask(ChildExecutor& childExecutor, Task<ChildExecutor, T>&& childTask)
+      : m_childExecutor(childExecutor)
+      , m_childTask(std::move(childTask))
+    {}
+
+    bool await_ready() { return false; }
+
+    template<ExecutorConcept ParentExecutor, typename U>
+    void await_suspend(std::coroutine_handle<Promise<ParentExecutor, U>> parent) {
+      if constexpr (std::is_same_v<ParentExecutor, ChildExecutor>) {
+        assert(parent.promise().executor != m_childExecutor);
+      }
+      Spawn(m_childExecutor, LaunchChild(Job(parent)));
+    }
+
+    auto await_resume() {
+      if constexpr (!std::is_void_v<T> ) {
+        assert(m_result);
+        return std::move(*m_result);
+      }
+    }
+
+
+    SpawnCrossTask(const SpawnCrossTask&) = delete;
+    SpawnCrossTask(SpawnCrossTask&&) = delete;
+    SpawnCrossTask& operator=(const SpawnCrossTask&) = delete;
+    SpawnCrossTask& operator=(SpawnCrossTask&&) = delete;
+
+  private:
+    template<ExecutorConcept ParentExecutor>
+    Task<ChildExecutor, void> LaunchChild(Job<ParentExecutor> parent) {
+      if constexpr (std::is_void_v<T>) {
+        co_await std::move(m_childTask);
+      } else {
+        m_result = co_await std::move(m_childTask);
+      }
+      parent.promise->executor->Spawn(parent);
+    }
+
+    ChildExecutor& m_childExecutor;
+    Task<ChildExecutor, T> m_childTask;
+    [[no_unique_address]] std::conditional_t<std::is_void_v<T>, std::monostate, std::optional<T>> m_result;
   };
 }

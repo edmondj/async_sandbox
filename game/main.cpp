@@ -20,42 +20,45 @@ int main() {
 
   auto echoTest = [&]() -> async_game::Task<> {
     utils::Log() << "Beginning";
-    //auto sendEcho = [&grpcExecutor, &echo](std::string_view message) -> async_game::Task<utils::expected<std::string, std::string>> {
-    //  utils::Log() << "Inside task";
-    //  echo_service::UnaryEchoRequest request;
-    //  request.set_message(std::string(message));
-    //  grpc::ClientContext context;
-    //  echo_service::UnaryEchoResponse response;
-    //  grpc::Status status;
-    //  utils::Log() << "Starting Echo";
-    //  co_await async_game::GrpcCoroutine(grpcExecutor.GetExecutor(), echo.CallUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(echo_service::EchoService, UnaryEcho), context, request, response, status));
-    //  utils::Log() << "Echo finished [" << status << "] [" << response.ShortDebugString() << ']';
-    //  if (status.ok()) {
-    //    co_return std::move(*response.mutable_message());
-    //  }
-    //  co_return utils::unexpected(GrpcStatusToString(status));
-    //};
+    auto sendEcho = [&](std::string_view message) -> async_grpc::Task<utils::expected<std::string, std::string>> {
+      utils::Log() << "Inside task";
+      echo_service::UnaryEchoRequest request;
+      request.set_message(std::string(message));
+      grpc::ClientContext context;
+      echo_service::UnaryEchoResponse response;
+      grpc::Status status;
+      utils::Log() << "Starting Echo";
+      if (!co_await echo.CallUnary(ASYNC_GRPC_CLIENT_PREPARE_FUNC(echo_service::EchoService, UnaryEcho), context, request, response, status)) {
+        utils::Log() << "Echo cancelled";
+        co_return utils::unexpected(std::string("Cancelled"));
+      }
+      utils::Log() << "Echo finished [" << status << "] [" << response.ShortDebugString() << ']';
+      if (status.ok()) {
+        co_return std::move(*response.mutable_message());
+      }
+      co_return utils::unexpected(GrpcStatusToString(status));
+    };
 
-    //utils::Log() << "Calling task";
-    //utils::expected<std::string, std::string> res = co_await sendEcho("Hello!");
-    //utils::Log() << "Task done";
-    //if (res) {
-    //  utils::Log() << "Success! Got: [" << *res << ']';
-    //}
-    //else {
-    //  utils::Log() << "Failed with error [" << res.error() << ']';
-    //}
+    utils::Log() << "Calling task";
+    utils::expected<std::string, std::string> res = co_await async_lib::SpawnCrossTask(grpcExecutor.GetExecutor(), sendEcho("Hello!"));
+    utils::Log() << "Task done";
+    if (res) {
+      utils::Log() << "Success! Got: [" << *res << ']';
+    }
+    else {
+      utils::Log() << "Failed with error [" << res.error() << ']';
+    }
 
 
-    //utils::Log() << "Sending Bye!";
-    //res = co_await sendEcho("Bye!");
-    //utils::Log() << "Bye done";
-    //if (res) {
-    //  utils::Log() << "Success! Got: [" << *res << ']';
-    //}
-    //else {
-    //  utils::Log() << "Failed with error [" << res.error() << ']';
-    //}
+    utils::Log() << "Sending Bye!";
+    res = co_await async_lib::SpawnCrossTask(grpcExecutor.GetExecutor(), sendEcho("Bye!"));
+    utils::Log() << "Bye done";
+    if (res) {
+      utils::Log() << "Success! Got: [" << *res << ']';
+    }
+    else {
+      utils::Log() << "Failed with error [" << res.error() << ']';
+    }
 
     utils::Log() << "Task done";
     ++done;
