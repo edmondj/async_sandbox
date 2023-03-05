@@ -26,7 +26,7 @@ public:
     m_executor.Update();
   }
 
-  virtual void ProcessInput(std::string_view input) {}
+  virtual void ProcessInput([[maybe_unused]] std::string_view input) {}
 
   virtual void Update([[maybe_unused]] Elapsed elapsed) {}
 
