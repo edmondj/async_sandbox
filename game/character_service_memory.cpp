@@ -5,17 +5,15 @@ async_game::Task<Player> CharacterServiceMemory::GetPlayer()
   co_return m_player;
 }
 
-async_game::Task<> CharacterServiceMemory::GiveXp(int64_t ammount)
+async_game::Task<int64_t> CharacterServiceMemory::GiveXp(int64_t ammount)
 {
-  m_player.xp += ammount;
-  co_return;
+  co_return m_player.xp += ammount;
 }
 
-async_game::Task<> CharacterServiceMemory::LevelUp()
+async_game::Task<int64_t> CharacterServiceMemory::LevelUp()
 {
-  ++m_player.level;
   m_player.xp = 0;
-  co_return;
+  co_return ++m_player.level;
 }
 
 async_game::Task<> CharacterServiceMemory::Reset()

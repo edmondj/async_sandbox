@@ -7,8 +7,8 @@ public:
   CharacterServiceGrpc();
 
   virtual async_game::Task<Player> GetPlayer() override;
-  virtual async_game::Task<> GiveXp(int64_t ammount) override;
-  virtual async_game::Task<> LevelUp() override;
+  virtual async_game::Task<int64_t> GiveXp(int64_t ammount) override;
+  virtual async_game::Task<int64_t> LevelUp() override;
   virtual async_game::Task<> Reset() override;
 
 private:

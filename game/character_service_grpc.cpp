@@ -3,7 +3,7 @@
 #include <utils/logs.hpp>
 
 static auto Log() {
-  return utils::Log() << "CharacterService: ";
+  return utils::Log() << "[CharacterServiceGrpc] ";
 }
 
 CharacterServiceGrpc::CharacterServiceGrpc()
@@ -12,7 +12,6 @@ CharacterServiceGrpc::CharacterServiceGrpc()
 
 async_game::Task<Player> CharacterServiceGrpc::GetPlayer()
 {
-  Log() << "Getting player...";
   co_return co_await async_lib::SpawnCrossTask(m_executor.GetExecutor(), [this]() -> async_grpc::Task<Player> {
     Player sent;
 
@@ -27,32 +26,27 @@ async_game::Task<Player> CharacterServiceGrpc::GetPlayer()
   }());
 }
 
-async_game::Task<> CharacterServiceGrpc::GiveXp(int64_t ammount)
+async_game::Task<int64_t> CharacterServiceGrpc::GiveXp(int64_t ammount)
 {
-  Log() << "Giving " << ammount << " xp";
-  co_await async_lib::SpawnCrossTask(m_executor.GetExecutor(), [this, ammount]() -> async_grpc::Task<> {
-
+  co_return co_await async_lib::SpawnCrossTask(m_executor.GetExecutor(), [this, ammount]() -> async_grpc::Task<int64_t> {
     int64_t cur_xp = (co_await Read("xp")).value_or(std::nullopt).value_or(0);
     co_await Write("xp", cur_xp + ammount);
-
+    co_return cur_xp;
   }());
 }
 
-async_game::Task<> CharacterServiceGrpc::LevelUp()
+async_game::Task<int64_t> CharacterServiceGrpc::LevelUp()
 {
-  Log() << "Level up!";
-  co_await async_lib::SpawnCrossTask(m_executor.GetExecutor(), [this]() -> async_grpc::Task<> {
-
+  co_return co_await async_lib::SpawnCrossTask(m_executor.GetExecutor(), [this]() -> async_grpc::Task<int64_t> {
     int64_t cur_level = (co_await Read("level")).value_or(std::nullopt).value_or(1);
     co_await Write("level", cur_level + 1);
     co_await Write("xp", 0);
-
+    co_return cur_level;
   }());
 }
 
 async_game::Task<> CharacterServiceGrpc::Reset()
 {
-  Log() << "Resetting";
   co_await async_lib::SpawnCrossTask(m_executor.GetExecutor(), [this]() -> async_grpc::Task<> {
 
     co_await Del("level");
