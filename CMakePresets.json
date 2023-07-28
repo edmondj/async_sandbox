@@ -5,7 +5,7 @@
       "name": "base",
       "hidden": true,
       "cacheVariables": {
-        "ASYNC_LIB_ASAN": true
+        "ASYNC_LIB_ASAN": false
       },
       "environment": {
         "VERBOSE":  true

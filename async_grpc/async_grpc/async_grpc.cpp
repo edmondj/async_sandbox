@@ -11,7 +11,9 @@ namespace async_grpc {
   {}
 
   CompletionQueueExecutor::~CompletionQueueExecutor() {
-    Shutdown();
+    if (m_cq) {
+      Shutdown();
+    }
   }
 
   grpc::CompletionQueue* CompletionQueueExecutor::GetCq()
@@ -31,6 +33,10 @@ namespace async_grpc {
     assert(job->job);
     async_lib::Resume(job->job);
     return true;
+  }
+  
+  std::jthread SpawnExecutorThread(grpc::CompletionQueue* cq) {
+    return std::jthread([cq]() { while (Tick(cq)) {} });
   }
 
   void CompletionQueueExecutor::Shutdown()

@@ -22,7 +22,7 @@ namespace async_grpc {
     }
     m_executors.reserve(options.executorCount);
     for (size_t i = 0; i < options.executorCount; ++i) {
-      m_executors.emplace_back(builder.AddCompletionQueue());
+      m_executors.emplace_back(builder.AddCompletionQueue(), options.threadsPerExecutor);
     }
     if (options.options) {
       builder.SetOption(std::move(options.options));

@@ -30,6 +30,7 @@ namespace async_grpc {
     std::vector<std::string> addresses;
     std::vector<std::reference_wrapper<IServiceImpl>> services;
     size_t executorCount = 2;
+    size_t threadsPerExecutor = 2;
     std::unique_ptr<grpc::ServerBuilderOption> options;
   };
 
@@ -343,7 +344,7 @@ namespace async_grpc {
 
     std::unique_ptr<grpc::Server> m_server;
 
-    std::vector<ExecutorThread<ServerExecutor>> m_executors;
+    std::vector<ExecutorThreads<ServerExecutor>> m_executors;
     std::atomic<size_t> m_nextExecutor = 0;
   };
 

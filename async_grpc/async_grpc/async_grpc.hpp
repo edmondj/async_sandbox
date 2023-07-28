@@ -5,7 +5,6 @@
 #include <grpcpp/alarm.h>
 #include <async_lib/async_lib.hpp>
 
-#include <iostream>
 namespace async_grpc {
   
   template<typename T>
@@ -25,6 +24,7 @@ namespace async_grpc {
   class CompletionQueueExecutor {
   public:
 
+    // Creates a new completion queue
     CompletionQueueExecutor();
     CompletionQueueExecutor(std::unique_ptr<grpc::CompletionQueue> cq) noexcept;
 
@@ -45,19 +45,28 @@ namespace async_grpc {
 
   bool Tick(grpc::CompletionQueue* cq);
 
+  std::jthread SpawnExecutorThread(grpc::CompletionQueue* cq);
+
   template<std::derived_from<CompletionQueueExecutor> TExecutor>
-  class ExecutorThread {
+  class ExecutorThreads {
   public:
-    template<typename... TArgs>
-    ExecutorThread(TArgs&&... args)
-      : m_executor(std::forward<TArgs>(args)...)
-      , m_thread([cq = m_executor.GetCq()]() { while (Tick(cq)); })
+    explicit ExecutorThreads(size_t threadCounts)
+      : ExecutorThreads(TExecutor{}, threadCounts)
     {}
 
-    ExecutorThread(ExecutorThread&&) = default;
-    ExecutorThread& operator=(ExecutorThread&&) = default;
+    ExecutorThreads(TExecutor executor, size_t threadCounts)
+      : m_executor(std::move(executor))
+    {
+      m_threads.reserve(threadCounts);
+      for (size_t i = 0; i < threadCounts; ++i) {
+        m_threads.push_back(SpawnExecutorThread(m_executor.GetCq()));
+      }
+    }
 
-    ~ExecutorThread() {
+    ExecutorThreads(ExecutorThreads&&) = default;
+    ExecutorThreads& operator=(ExecutorThreads&&) = default;
+
+    ~ExecutorThreads() {
       Shutdown();
     }
 
@@ -66,12 +75,9 @@ namespace async_grpc {
 
   private:
     TExecutor m_executor;
-    std::jthread m_thread;
+    std::vector<std::jthread> m_threads;
   };
 
-  struct ClientExecutorThread : public ExecutorThread<CompletionQueueExecutor> {
-    ClientExecutorThread() = default;
-  };
 
   struct SuspendedJob {
     Job job;

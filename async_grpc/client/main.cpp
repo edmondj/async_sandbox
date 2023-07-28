@@ -4,6 +4,7 @@
 #include <protos/echo_service.grpc.pb.h>
 #include <protos/variable_service.grpc.pb.h>
 #include <utils/logs.hpp>
+#include <ranges>
 
 using EchoClient = async_grpc::Client<echo_service::EchoService>;
 using VariableClient = async_grpc::Client<variable_service::VariableService>;
@@ -21,6 +22,10 @@ public:
     ADD_HANDLER(ServerStreamEcho);
     ADD_HANDLER(BidirectionalStreamEcho);
 #undef ADD_HANDLER
+  }
+
+  auto AvailableCommands() const {
+    return std::views::keys(m_handlers);
   }
 
   void Process(std::string_view line) {
@@ -118,7 +123,9 @@ private:
     for (auto&& msg : { "Hello!", "World!", "Bye!" }) {
       request.set_message(msg);
       utils::Log() << "Sending [" << request.ShortDebugString() << "]";
-      if (!co_await call->Write(request)) {
+      grpc::WriteOptions opt;
+      opt.set_buffer_hint();
+      if (!co_await call->Write(request, opt)) {
         utils::Log() << "Cancelled";
         co_return;
       }
@@ -226,7 +233,7 @@ private:
   }
 
   EchoClient m_echo;
-  async_grpc::ClientExecutorThread m_executor;
+  async_grpc::ClientExecutorThreads m_executor{ 2 };
   using THandler = async_grpc::Task<>(Program::*)();
   std::map<std::string, THandler> m_handlers;
 };
@@ -234,10 +241,21 @@ private:
 int main() {
   Program program(grpc::CreateChannel("[::1]:4213", grpc::InsecureChannelCredentials()));
 
+  utils::Log() << "Client ready, type `help` for a list of commands or `quit` to quit";
   for (std::string line; std::getline(std::cin, line);) {
     if (line == "quit") {
       break;
     }
-    program.Process(line);
+    else if (line == "help") {
+      const char* delim = "";
+      auto log = utils::Log() << "Available commands: ";
+      for (std::string_view cmd : program.AvailableCommands()) {
+        log << delim << cmd;
+        delim = ", ";
+      }
+    }
+    else {
+      program.Process(line);
+    }
   }
 }

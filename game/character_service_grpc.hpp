@@ -13,7 +13,8 @@ public:
 
 private:
   async_grpc::Client<variable_service::VariableService> m_client;
-  async_grpc::ClientExecutorThread m_executor;
+  // TODO Take the executor as a dependency
+  async_grpc::ClientExecutorThreads m_executor{ 1 };
 
   async_grpc::Task<utils::expected<std::optional<int64_t>, grpc::Status>> Read(std::string_view name);
   async_grpc::Task<utils::expected<void, grpc::Status>> Write(std::string_view name, int64_t value);

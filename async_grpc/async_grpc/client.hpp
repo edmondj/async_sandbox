@@ -4,6 +4,7 @@
 #include <optional>
 
 namespace async_grpc {
+  using ClientExecutorThreads = ExecutorThreads<CompletionQueueExecutor>;
 
   class ChannelProvider {
   public:
