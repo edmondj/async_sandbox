@@ -4,7 +4,11 @@
 
 class CharacterServiceGrpc final : public CharacterService {
 public:
-  CharacterServiceGrpc();
+  struct Dependencies {
+    async_grpc::CompletionQueueExecutor& executor;
+  };
+
+  explicit CharacterServiceGrpc(Dependencies deps);
 
   virtual async_game::Task<Player> GetPlayer() override;
   virtual async_game::Task<int64_t> GiveXp(int64_t ammount) override;
@@ -12,9 +16,8 @@ public:
   virtual async_game::Task<> Reset() override;
 
 private:
+  Dependencies m_dependencies;
   async_grpc::Client<variable_service::VariableService> m_client;
-  // TODO Take the executor as a dependency
-  async_grpc::ClientExecutorThreads m_executor{ 1 };
 
   async_grpc::Task<utils::expected<std::optional<int64_t>, grpc::Status>> Read(std::string_view name);
   async_grpc::Task<utils::expected<void, grpc::Status>> Write(std::string_view name, int64_t value);

@@ -209,12 +209,18 @@ private:
   clock::time_point m_lastTick;
 };
 
-std::unique_ptr<CharacterService> MakeCharacterService(std::string_view type) {
+struct EnvDependencies
+{
+  std::unique_ptr<async_grpc::ClientExecutorThreads> grpcExecutor;
+};
+
+std::unique_ptr<CharacterService> MakeCharacterService(std::string_view type, const EnvDependencies& dependencies) {
   if (type == "memory") {
     return std::make_unique<CharacterServiceMemory>();
   }
   else if (type == "grpc") {
-    return std::make_unique<CharacterServiceGrpc>();
+    assert(dependencies.grpcExecutor);
+    return std::make_unique<CharacterServiceGrpc>(CharacterServiceGrpc::Dependencies{ .executor = dependencies.grpcExecutor->GetExecutor() });
   }
   return nullptr;
 }
@@ -224,8 +230,14 @@ int main(int ac, char** av) {
     std::cout << "Usage: " << av[0] << " memory|grpc" << std::endl;
     return 1;
   }
-  auto game = Game(Game::Dependencies{
-    .characterService = MakeCharacterService(av[1])
+
+  EnvDependencies deps;
+  if (av[1] == "grpc"sv) {
+    deps.grpcExecutor = std::make_unique<async_grpc::ClientExecutorThreads>(async_grpc::ClientExecutorThreads(2));
+  }
+
+  auto game = Game({
+    .characterService = MakeCharacterService(av[1], deps)
     }
   );
 

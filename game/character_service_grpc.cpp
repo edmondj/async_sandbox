@@ -6,13 +6,14 @@ static auto Log() {
   return utils::Log() << "[CharacterServiceGrpc] ";
 }
 
-CharacterServiceGrpc::CharacterServiceGrpc()
-  : m_client(grpc::CreateChannel("[::1]:4213", grpc::InsecureChannelCredentials()))
+CharacterServiceGrpc::CharacterServiceGrpc(Dependencies deps)
+  : m_dependencies(std::move(deps))
+  , m_client(grpc::CreateChannel("[::1]:4213", grpc::InsecureChannelCredentials()))
 {}
 
 async_game::Task<Player> CharacterServiceGrpc::GetPlayer()
 {
-  co_return co_await async_lib::SpawnCrossTask(m_executor.GetExecutor(), [this]() -> async_grpc::Task<Player> {
+  co_return co_await async_lib::SpawnCrossTask(m_dependencies.executor, [this]() -> async_grpc::Task<Player> {
     Player sent;
 
     if (auto res = co_await Read("level")) {
@@ -28,7 +29,7 @@ async_game::Task<Player> CharacterServiceGrpc::GetPlayer()
 
 async_game::Task<int64_t> CharacterServiceGrpc::GiveXp(int64_t ammount)
 {
-  co_return co_await async_lib::SpawnCrossTask(m_executor.GetExecutor(), [this, ammount]() -> async_grpc::Task<int64_t> {
+  co_return co_await async_lib::SpawnCrossTask(m_dependencies.executor, [this, ammount]() -> async_grpc::Task<int64_t> {
     int64_t cur_xp = (co_await Read("xp")).value_or(std::nullopt).value_or(0);
     co_await Write("xp", cur_xp + ammount);
     co_return cur_xp;
@@ -37,7 +38,7 @@ async_game::Task<int64_t> CharacterServiceGrpc::GiveXp(int64_t ammount)
 
 async_game::Task<int64_t> CharacterServiceGrpc::LevelUp()
 {
-  co_return co_await async_lib::SpawnCrossTask(m_executor.GetExecutor(), [this]() -> async_grpc::Task<int64_t> {
+  co_return co_await async_lib::SpawnCrossTask(m_dependencies.executor, [this]() -> async_grpc::Task<int64_t> {
     int64_t cur_level = (co_await Read("level")).value_or(std::nullopt).value_or(1);
     co_await Write("level", cur_level + 1);
     co_await Write("xp", 0);
@@ -47,7 +48,7 @@ async_game::Task<int64_t> CharacterServiceGrpc::LevelUp()
 
 async_game::Task<> CharacterServiceGrpc::Reset()
 {
-  co_await async_lib::SpawnCrossTask(m_executor.GetExecutor(), [this]() -> async_grpc::Task<> {
+  co_await async_lib::SpawnCrossTask(m_dependencies.executor, [this]() -> async_grpc::Task<> {
 
     co_await Del("level");
     co_await Del("xp");

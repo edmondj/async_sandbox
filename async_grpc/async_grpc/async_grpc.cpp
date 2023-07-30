@@ -11,9 +11,7 @@ namespace async_grpc {
   {}
 
   CompletionQueueExecutor::~CompletionQueueExecutor() {
-    if (m_cq) {
-      Shutdown();
-    }
+    Shutdown();
   }
 
   grpc::CompletionQueue* CompletionQueueExecutor::GetCq()
@@ -41,7 +39,9 @@ namespace async_grpc {
 
   void CompletionQueueExecutor::Shutdown()
   {
-    m_cq->Shutdown();
+    if (m_cq) {
+      m_cq->Shutdown();
+    }
   }
 
   void CompletionQueueExecutor::Spawn(const Job& job) {
